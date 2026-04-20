@@ -1,11 +1,38 @@
 Installation
 ============
 
-TorchQuant can be installed using pip, the Python package installer. To install TorchQuant, run the following command:
+Install TorchQuant from PyPI:
 
 .. code-block:: bash
 
    pip install --upgrade torchquantlib
+
+Install the local project in editable mode:
+
+.. code-block:: bash
+
+   pip install -e .
+
+Optional dependency groups
+--------------------------
+
+Install documentation dependencies:
+
+.. code-block:: bash
+
+   pip install -e ".[docs]"
+
+Install test dependencies:
+
+.. code-block:: bash
+
+   pip install -e ".[test]"
+
+Install the common local development toolchain:
+
+.. code-block:: bash
+
+   pip install -e ".[dev]"
 
 Requirements
 ------------
@@ -13,8 +40,9 @@ Requirements
 TorchQuant requires:
 
 - Python 3.7+
-- PyTorch 2.4.0+
+- PyTorch
 - NumPy
-- Geomloss
+- SciPy
+- GeomLoss
 
-For GPU acceleration, ensure you have a CUDA-compatible GPU and the appropriate CUDA toolkit installed.
+For GPU acceleration, ensure that your PyTorch installation matches your CUDA or other accelerator runtime.

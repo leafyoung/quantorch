@@ -1,7 +1,12 @@
 Interest Rate Models
 ====================
 
-This package contains various interest rate models implemented in TorchQuantLib.
+This package groups the interest-rate models re-exported from ``torchquantlib``.
+
+.. automodule:: torchquantlib.models.interest_rate
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 .. toctree::
    :maxdepth: 2
@@ -11,10 +16,3 @@ This package contains various interest rate models implemented in TorchQuantLib.
    torchquantlib.models.interest_rate.hull_white
    torchquantlib.models.interest_rate.lmm
    torchquantlib.models.interest_rate.vasicek
-
-.. automodule:: torchquantlib.models.interest_rate
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-

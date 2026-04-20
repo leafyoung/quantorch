@@ -6,6 +6,7 @@ This section provides detailed documentation for TorchQuant APIs.
 .. toctree::
    :maxdepth: 2
 
+   public_api
    torchquantlib.core
    torchquantlib.models
    torchquantlib.calibration

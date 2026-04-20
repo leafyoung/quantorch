@@ -75,10 +75,40 @@ This table outlines the analogy between financial instruments and neural network
   
 ## Installation
 
-You can install torchquant via pip:
+Install from PyPI:
 
 ```bash
 pip install --upgrade torchquantlib
+```
+
+Install the local project in editable mode:
+
+```bash
+pip install -e .
+```
+
+Install common development dependencies:
+
+```bash
+pip install -e ".[dev]"
+```
+
+## Public API
+
+Prefer the explicit package-level imports below when writing downstream code:
+
+```python
+from torchquantlib import (
+    Heston,
+    MalliavinGreeks,
+    ModelCalibrator,
+    SABR,
+    Vasicek,
+    american_option,
+    asian_option,
+    bermudan_option,
+    black_scholes_merton,
+)
 ```
 
 ## Usage (check out the examples folder for more information)
@@ -89,7 +119,7 @@ pip install --upgrade torchquantlib
 
 ```python
 import torch
-from torchquantlib.core.asset_pricing.option.american_option import american_option  # 修正路径
+from torchquantlib import american_option
 
 spot = torch.tensor(100.0)
 strike = torch.tensor(105.0)
@@ -106,7 +136,7 @@ print(f'American Option Price: {price.item()}')
 
 ```python
 import torch
-from torchquantlib.core.asset_pricing.option.bermudan_option import bermudan_option  # 修正路径
+from torchquantlib import bermudan_option
 
 spot = torch.tensor(100.0)
 strike = torch.tensor(105.0)
@@ -124,7 +154,7 @@ print(f'Bermudan Option Price: {price.item()}')
 
 ```python
 import torch
-from torchquantlib.core.asset_pricing.option.asian_option import asian_option  # 修正路径
+from torchquantlib import asian_option
 
 spot = torch.tensor(100.0)
 strike = torch.tensor(105.0)
@@ -141,15 +171,17 @@ print(f'Asian Option Price: {price.item()}')
 
 ```python
 import torch
-from torchquantlib.core.risk.greeks.malliavin import malliavin_greek
+from torchquantlib import MalliavinGreeks
 
-option_price = torch.tensor(10.0)
-underlying_price = torch.tensor(100.0)
-volatility = torch.tensor(0.2)
-expiry = torch.tensor(1.0)
-
-greek = malliavin_greek(option_price, underlying_price, volatility, expiry)
-print(f'Malliavin Greek: {greek.item()}')
+greeks = MalliavinGreeks()
+results = greeks.european_option_greeks(
+    S0=torch.tensor(100.0),
+    K=torch.tensor(100.0),
+    T=torch.tensor(1.0),
+    r=torch.tensor(0.05),
+    sigma=torch.tensor(0.2),
+)
+print(results)
 ```
 
 ### Model Calibration by Optimal Transport
@@ -161,25 +193,22 @@ print(f'Malliavin Greek: {greek.item()}')
 
 import numpy as np
 import torch
-from torchquantlib.calibration import model_calibrator
-from torchquantlib.models.stochastic_volatility.heston import Heston
+from torchquantlib import Heston, ModelCalibrator
 
 # Generate synthetic observed data using true Heston parameters
 N_observed = 1000
 S0 = 100.0
 T = 1.0
-true_params = {
-    'kappa': 2.0,
-    'theta': 0.04,
-    'sigma_v': 0.3,
-    'rho': -0.7,
-    'v0': 0.04,
-    'mu': 0.05
-}
-
 np.random.seed(42)
 torch.manual_seed(42)
-heston_true = Heston(**true_params)
+heston_true = Heston(
+    kappa_init=2.0,
+    theta_init=0.04,
+    sigma_v_init=0.3,
+    rho_init=-0.7,
+    v0_init=0.04,
+    mu_init=0.05,
+)
 S_observed = heston_true.simulate(S0=S0, T=T, N=N_observed)
 
 # Initialize the Heston model with initial guesses
@@ -193,7 +222,7 @@ heston_model = Heston(
 )
 
 # Set up the calibrator
-calibrator = model_calibrator(
+calibrator = ModelCalibrator(
     model=heston_model,
     observed_data=S_observed.detach().cpu().numpy(),  # Convert tensor to numpy array
     S0=S0,
@@ -213,7 +242,7 @@ for name, value in calibrated_params.items():
 
 ## Seq2Seq PDE Solver
 ```python
-from torchquantlib.utils import Seq2SeqPDESolver
+from torchquantlib import Seq2SeqPDESolver
 # Define model parameters
 input_dim = 1      # Adjust based on your input features
 hidden_dim = 64    # Number of features in the hidden state
@@ -241,8 +270,7 @@ for epoch in range(num_epochs):
 ## Credit Risk Measurement
 ```python
 import torch
-from torchquantlib.core.risk.credit_risk.structural_model import merton_model
-from torchquantlib.core.risk.credit_risk.reduced_form_model import reduced_form_model
+from torchquantlib import merton_model, reduced_form_model
 
 asset_value = torch.tensor(100.0)
 debt = torch.tensor(80.0)
@@ -275,9 +303,9 @@ print(f'Expected Loss (Reduced Form Model): {expected_loss.item()}')
 To contribute to TorchQuant, clone the repository and install the required dependencies:
 
 ```bash
-git clone https://github.com/jialuechen/torchquant.git
-cd torchquant
-pip install -r requirements.txt
+git clone https://github.com/jialuechen/torchquantlib.git
+cd torchquantlib
+pip install -e ".[dev]"
 ```
 
 Run the tests to ensure everything is working:

@@ -125,7 +125,7 @@ Here's a basic example of how to use the AsianOption class:
 
 .. code-block:: python
 
-   from torchquantlib.core.asset_pricing.option.asian_option import AsianOption
+   from torchquantlib import AsianOption
 
    # Create an Asian call option
    option = AsianOption(

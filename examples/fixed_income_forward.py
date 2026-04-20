@@ -1,5 +1,7 @@
 import torch
-from torchquantlib.core.asset_pricing.bond.fixed_income_forward import fixed_income_forward
+
+from torchquantlib import fixed_income_forward
+
 
 face_value = torch.tensor(1000.0)
 rate = torch.tensor(0.05)
@@ -7,4 +9,4 @@ time_to_maturity = torch.tensor(1.0)
 forward_rate = torch.tensor(0.06)
 
 price = fixed_income_forward(face_value, rate, time_to_maturity, forward_rate)
-print(f'Fixed Income Forward Price: {price.item()}')
+print(f"Fixed Income Forward Price: {price.item()}")

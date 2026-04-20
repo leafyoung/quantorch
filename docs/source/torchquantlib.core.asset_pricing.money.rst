@@ -1,14 +1,14 @@
 Money Market
-===============================================
+============
 
-.. toctree::
-   :maxdepth: 4
+The money-market package currently exposes the public ``future_pricer`` helper.
 
-   torchquantlib.core.asset_pricing.money.future_pricer
-
-
-.. automodule:: torchquantlib.core.asset_pricing.money.future_pricer
+.. automodule:: torchquantlib.core.asset_pricing.money
    :members:
    :undoc-members:
    :show-inheritance:
 
+.. toctree::
+   :maxdepth: 2
+
+   torchquantlib.core.asset_pricing.money.future_pricer

@@ -48,7 +48,7 @@ Here's a basic example of how to use the black_scholes_merton function:
 .. code-block:: python
 
    import torch
-   from torchquantlib.core.asset_pricing.option.black_scholes_merton import black_scholes_merton
+   from torchquantlib import black_scholes_merton
 
    # Set option parameters
    option_type = 'call'

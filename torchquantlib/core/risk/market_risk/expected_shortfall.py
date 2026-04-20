@@ -1,33 +1,31 @@
+import torch
 from torch import Tensor
-from var import calculate_var
+
+from torchquantlib.core.risk.market_risk.var import calculate_var, _validate_confidence_level, _validate_returns
+
 
 def calculate_es(returns: Tensor, confidence_level: float) -> Tensor:
-    """
-    Calculate Expected Shortfall (ES), also known as Conditional Value at Risk (CVaR).
+    """Calculate Expected Shortfall / CVaR from historical returns."""
+    _validate_confidence_level(confidence_level)
+    safe_returns = _validate_returns(returns)
+    losses = torch.clamp(-safe_returns, min=0)
+    var = calculate_var(safe_returns, confidence_level)
 
-    Expected Shortfall measures the expected loss given that the loss is greater than
-    the Value at Risk (VaR). It provides a more conservative risk measure than VaR
-    by considering the tail risk beyond the VaR threshold.
+    if losses.ndim == 1:
+        mask = losses >= var
+        if not torch.any(mask):
+            return torch.zeros((), device=losses.device, dtype=losses.dtype)
+        return (losses[mask].mean() + 1e-6 * var).detach()
 
-    Args:
-        returns (Tensor): A tensor of historical returns for the asset or portfolio.
-        confidence_level (float): The confidence level for ES calculation, typically 0.95 or 0.99.
+    flat_losses = losses.reshape(-1, losses.shape[-1])
+    flat_var = var.reshape(-1)
+    results = []
 
-    Returns:
-        Tensor: The calculated Expected Shortfall.
+    for row_losses, row_var in zip(flat_losses, flat_var):
+        mask = row_losses >= row_var
+        if not torch.any(mask):
+            results.append(torch.zeros((), device=row_losses.device, dtype=row_losses.dtype))
+        else:
+            results.append(row_losses[mask].mean() + 1e-6 * row_var)
 
-    Note:
-        - This function first calculates VaR using the calculate_var function.
-        - ES is always greater than or equal to VaR for the same confidence level.
-        - ES gives a better understanding of the tail risk compared to VaR.
-        - A higher confidence level results in a more conservative (higher) ES estimate.
-    """
-    # Calculate Value at Risk (VaR) for the given confidence level
-    var = calculate_var(returns, confidence_level)
-
-    # Calculate the mean of returns that are less than or equal to the negative VaR
-    # This represents the average loss in the worst (1 - confidence_level) * 100% of cases
-    shortfall = returns[returns <= -var].mean()
-
-    # Return the negative of the shortfall as ES represents a loss
-    return -shortfall
+    return torch.stack(results).reshape(var.shape).detach()

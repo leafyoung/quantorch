@@ -1,79 +1,116 @@
-import torch
+from __future__ import annotations
 
+import json
+import logging
+from typing import Callable
+
+import torch
 import torch.nn as nn
 import torch.optim as optim
 
+LOGGER = logging.getLogger(__name__)
+LOGGER.addHandler(logging.NullHandler())
+
+
 class Generator(nn.Module):
     def __init__(self, input_dim, output_dim):
-        super(Generator, self).__init__()
+        super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
         self.model = nn.Sequential(
             nn.Linear(input_dim, 128),
             nn.ReLU(),
             nn.Linear(128, 256),
             nn.ReLU(),
             nn.Linear(256, output_dim),
-            nn.Tanh()
+            nn.Tanh(),
         )
 
     def forward(self, x):
         return self.model(x)
 
+
 class Discriminator(nn.Module):
     def __init__(self, input_dim):
-        super(Discriminator, self).__init__()
+        super().__init__()
+        self.input_dim = input_dim
         self.model = nn.Sequential(
             nn.Linear(input_dim, 256),
             nn.LeakyReLU(0.2),
             nn.Linear(256, 128),
             nn.LeakyReLU(0.2),
             nn.Linear(128, 1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
         return self.model(x)
 
-def train_gan(generator, discriminator, data_loader, num_epochs=1000, lr=0.0002):
+
+def _extract_batch_tensor(real_data):
+    if isinstance(real_data, (tuple, list)):
+        return real_data[0]
+    return real_data
+
+
+def _emit_event(payload: dict) -> None:
+    LOGGER.info(json.dumps(payload, sort_keys=True))
+
+
+def train_gan(
+    generator,
+    discriminator,
+    data_loader,
+    num_epochs=1000,
+    lr=0.0002,
+    *,
+    log_interval: int = 100,
+    progress_callback: Callable[[dict], None] | None = None,
+):
     criterion = nn.BCELoss()
     optimizer_g = optim.Adam(generator.parameters(), lr=lr)
     optimizer_d = optim.Adam(discriminator.parameters(), lr=lr)
 
     for epoch in range(num_epochs):
-        for real_data in data_loader:
-            batch_size = real_data.size(0)
-            real_labels = torch.ones(batch_size, 1)
-            fake_labels = torch.zeros(batch_size, 1)
+        epoch_summary = None
 
-            # Train Discriminator
+        for real_data in data_loader:
+            real_batch = _extract_batch_tensor(real_data)
+            batch_size = real_batch.size(0)
+            device = real_batch.device
+            real_labels = torch.ones(batch_size, 1, device=device)
+            fake_labels = torch.zeros(batch_size, 1, device=device)
+
             optimizer_d.zero_grad()
-            outputs = discriminator(real_data)
+            outputs = discriminator(real_batch)
             d_loss_real = criterion(outputs, real_labels)
             d_loss_real.backward()
 
-            noise = torch.randn(batch_size, generator.input_dim)
+            noise = torch.randn(batch_size, generator.input_dim, device=device)
             fake_data = generator(noise)
             outputs = discriminator(fake_data.detach())
             d_loss_fake = criterion(outputs, fake_labels)
             d_loss_fake.backward()
             optimizer_d.step()
 
-            # Train Generator
             optimizer_g.zero_grad()
             outputs = discriminator(fake_data)
             g_loss = criterion(outputs, real_labels)
             g_loss.backward()
             optimizer_g.step()
 
-        if epoch % 100 == 0:
-            print(f'Epoch [{epoch}/{num_epochs}], d_loss: {d_loss_real.item() + d_loss_fake.item()}, g_loss: {g_loss.item()}')
+            epoch_summary = {
+                "event": "gan_training_progress",
+                "module": __name__,
+                "function": "train_gan",
+                "status": "running",
+                "epoch": epoch,
+                "num_epochs": num_epochs,
+                "discriminator_loss": float((d_loss_real + d_loss_fake).item()),
+                "generator_loss": float(g_loss.item()),
+            }
 
-if __name__ == "__main__":
-    input_dim = 100  # Example input dimension for noise
-    output_dim = 10  # Example output dimension for implied volatility surface
-    generator = Generator(input_dim, output_dim)
-    discriminator = Discriminator(output_dim)
-
-    # Example data loader, replace with actual data
-    data_loader = torch.utils.data.DataLoader(torch.randn(1000, output_dim), batch_size=32, shuffle=True)
-
-    train_gan(generator, discriminator, data_loader)
+        if epoch_summary and (epoch % log_interval == 0 or epoch == num_epochs - 1):
+            _emit_event(epoch_summary)
+            if progress_callback is not None:
+                progress_callback(epoch_summary)

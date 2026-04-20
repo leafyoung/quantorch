@@ -1,116 +1,196 @@
-from geomloss import SamplesLoss  # Ensure you have installed geomloss: pip install geomloss
+from __future__ import annotations
+
+import json
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any
+
 import torch
 import torch.optim as optim
+from geomloss import SamplesLoss
+
+LOGGER = logging.getLogger(__name__)
+LOGGER.addHandler(logging.NullHandler())
+
+
+@dataclass(frozen=True)
+class CalibrationConfig:
+    S0: float | None = None
+    T: float = 1.0
+    loss_type: str = "sinkhorn"
+    p: int = 2
+    blur: float = 0.05
+    lr: float = 0.01
+
 
 class ModelCalibrator:
-    """
-    Calibrates a stochastic model using various loss functions, including Sinkhorn divergence, MSE, and Log-Likelihood.
-    """
-    def __init__(self, model, observed_data, S0=None, T=1.0, loss_type="sinkhorn", p=2, blur=0.05, optimizer_cls=optim.Adam, lr=0.01):
-        """
-        Initialize the calibrator.
+    """Calibrate a stochastic model against observed data."""
 
-        Args:
-            model: The stochastic model to calibrate.
-            observed_data: Observed data to calibrate against.
-            S0: Initial state of the model (optional).
-            T: Time horizon for simulation.
-            loss_type: Type of loss function ('sinkhorn', 'mse', 'log_likelihood').
-            p: Power parameter for Sinkhorn divergence.
-            blur: Blur parameter for Sinkhorn divergence.
-            optimizer_cls: Optimizer class (default: Adam).
-            lr: Learning rate for the optimizer.
-        """
+    def __init__(
+        self,
+        model,
+        observed_data,
+        S0=None,
+        T=1.0,
+        loss_type="sinkhorn",
+        p=2,
+        blur=0.05,
+        optimizer_cls=optim.Adam,
+        lr=0.01,
+    ):
         self.model = model
-        self.observed_data = torch.tensor(observed_data, dtype=torch.float32, device=self.model.device)
-        self.S0 = S0
-        self.T = T
-        self.loss_type = loss_type
-        self.lr = lr
+        self.config = CalibrationConfig(S0=S0, T=T, loss_type=loss_type, p=p, blur=blur, lr=lr)
         self.optimizer_cls = optimizer_cls
+        self.observed_data = self._prepare_observed_data(observed_data)
+        self.loss_fn = self._build_loss_function()
+        self.optimizer = self._setup_optimizer()
+        self.loss_history: list[float] = []
+        self.last_run_summary: dict[str, Any] | None = None
 
-        # Initialize the loss function
-        if loss_type == "sinkhorn":
-            self.loss_fn = SamplesLoss(loss_type, p=p, blur=blur)
-        elif loss_type == "mse":
-            self.loss_fn = torch.nn.MSELoss()
-        elif loss_type == "log_likelihood":
-            self.loss_fn = self._log_likelihood_loss
-        else:
-            raise ValueError(f"Unsupported loss type: {loss_type}")
+    def _prepare_observed_data(self, observed_data) -> torch.Tensor:
+        return torch.as_tensor(observed_data, dtype=torch.float32, device=self.model.device)
 
-        self._setup_optimizer()
+    def _build_loss_function(self):
+        if self.config.loss_type == "sinkhorn":
+            return SamplesLoss(self.config.loss_type, p=self.config.p, blur=self.config.blur)
+        if self.config.loss_type == "mse":
+            return torch.nn.MSELoss()
+        if self.config.loss_type == "log_likelihood":
+            return self._log_likelihood_loss
+        raise ValueError(f"Unsupported loss type: {self.config.loss_type}")
 
     def _setup_optimizer(self):
-        """Set up the optimizer for model parameters."""
-        params = []
-        for param in self.model.params.values():
-            if param.requires_grad:
-                params.append(param)
-        self.optimizer = self.optimizer_cls(params, lr=self.lr)
+        params = [param for param in self.model.params.values() if param.requires_grad]
+        return self.optimizer_cls(params, lr=self.config.lr)
 
     def _log_likelihood_loss(self, simulated_data, observed_data):
-        """
-        Compute the negative log-likelihood loss.
-
-        Args:
-            simulated_data: Simulated data from the model.
-            observed_data: Observed data to calibrate against.
-
-        Returns:
-            Tensor: Negative log-likelihood loss.
-        """
-        # Assume Gaussian likelihood for simplicity
         mean = simulated_data.mean(dim=0)
-        variance = simulated_data.var(dim=0) + 1e-6  # Add small value to avoid division by zero
+        variance = simulated_data.var(dim=0) + 1e-6
         log_likelihood = -0.5 * torch.sum((observed_data - mean) ** 2 / variance + torch.log(variance))
         return -log_likelihood
 
+    def _reshape_samples(self, simulated_data: torch.Tensor, observed_data: torch.Tensor):
+        if simulated_data.dim() > 1:
+            return simulated_data.view(simulated_data.shape[0], -1), observed_data.view(observed_data.shape[0], -1)
+        return simulated_data.view(-1, 1), observed_data.view(-1, 1)
+
+    def _format_param_value(self, value: Any):
+        if isinstance(value, float):
+            return round(value, 6)
+        if hasattr(value, "tolist"):
+            return value.tolist()
+        return value
+
+    def _build_event_payload(self, event: str, status: str, **fields: Any) -> dict[str, Any]:
+        payload = {
+            "event": event,
+            "module": __name__,
+            "function": "calibrate",
+            "status": status,
+            "loss_type": self.config.loss_type,
+        }
+        payload.update(fields)
+        return payload
+
+    def _emit_event(self, payload: dict[str, Any], *, verbose: bool) -> None:
+        message = json.dumps(payload, sort_keys=True)
+        LOGGER.info(message)
+        if verbose:
+            print(message)
+
     def calibrate(self, num_epochs=1000, batch_size=None, steps=100, verbose=True):
-        """
-        Perform calibration by minimizing the loss function.
-
-        Args:
-            num_epochs: Number of epochs for calibration.
-            batch_size: Batch size for simulation (default: size of observed data).
-            steps: Number of time steps in the simulation.
-            verbose: Whether to print progress during calibration.
-        """
-        if batch_size is None:
-            batch_size = len(self.observed_data)
+        batch_size = len(self.observed_data) if batch_size is None else int(batch_size)
         observed_tensor = self.observed_data
+        progress_interval = max(1, num_epochs // 10)
+        run_started_at = time.perf_counter()
 
-        for epoch in range(num_epochs):
-            self.optimizer.zero_grad()
-            simulated_data = self.model.simulate(S0=self.S0, T=self.T, N=batch_size, steps=steps)
+        self.loss_history = []
+        self._emit_event(
+            self._build_event_payload(
+                event="model_calibration_started",
+                status="running",
+                batch_size=batch_size,
+                num_epochs=num_epochs,
+                steps=steps,
+            ),
+            verbose=verbose,
+        )
 
-            # Flatten data if necessary
-            if simulated_data.dim() > 1:
-                simulated_flat = simulated_data.view(batch_size, -1)
-                observed_flat = observed_tensor.view(batch_size, -1)
-            else:
-                simulated_flat = simulated_data.view(-1, 1)
-                observed_flat = observed_tensor.view(-1, 1)
+        try:
+            for epoch in range(num_epochs):
+                self.optimizer.zero_grad()
+                simulated_data = self.model.simulate(
+                    S0=self.config.S0,
+                    T=self.config.T,
+                    N=batch_size,
+                    steps=steps,
+                )
 
-            # Compute loss
-            loss = self.loss_fn(simulated_flat, observed_flat)
-            loss.backward()
-            self.optimizer.step()
+                simulated_flat, observed_flat = self._reshape_samples(simulated_data, observed_tensor)
+                loss = self.loss_fn(simulated_flat, observed_flat)
+                loss.backward()
+                self.optimizer.step()
+                self.model._apply_constraints()
 
-            # Apply parameter constraints
-            self.model._apply_constraints()
+                loss_value = float(loss.item())
+                self.loss_history.append(loss_value)
 
-            if verbose and epoch % (num_epochs // 10) == 0:
-                params_str = ', '.join([f'{name}: {param.item() if param.dim()==0 else param.detach().cpu().numpy()}' for name, param in self.model.params.items()])
-                print(f'Epoch {epoch}, Loss: {loss.item():.6f}, {params_str}')
+                should_report = epoch % progress_interval == 0 or epoch == num_epochs - 1
+                if should_report:
+                    self._emit_event(
+                        self._build_event_payload(
+                            event="model_calibration_progress",
+                            status="running",
+                            epoch=epoch,
+                            num_epochs=num_epochs,
+                            loss=round(loss_value, 6),
+                            batch_size=batch_size,
+                            steps=steps,
+                            params={
+                                name: self._format_param_value(value)
+                                for name, value in self.get_calibrated_params().items()
+                            },
+                        ),
+                        verbose=verbose,
+                    )
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - run_started_at) * 1000, 3)
+            self._emit_event(
+                self._build_event_payload(
+                    event="model_calibration_failed",
+                    status="error",
+                    batch_size=batch_size,
+                    duration_ms=duration_ms,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                ),
+                verbose=verbose,
+            )
+            raise
+
+        duration_ms = round((time.perf_counter() - run_started_at) * 1000, 3)
+        self.last_run_summary = {
+            "batch_size": batch_size,
+            "duration_ms": duration_ms,
+            "final_loss": self.loss_history[-1] if self.loss_history else None,
+            "num_epochs": num_epochs,
+            "steps": steps,
+        }
+        self._emit_event(
+            self._build_event_payload(
+                event="model_calibration_completed",
+                status="success",
+                batch_size=batch_size,
+                duration_ms=duration_ms,
+                final_loss=round(self.loss_history[-1], 6) if self.loss_history else None,
+                num_epochs=num_epochs,
+                steps=steps,
+            ),
+            verbose=verbose,
+        )
 
     def get_calibrated_params(self):
-        """
-        Retrieve the calibrated parameters of the model.
-
-        Returns:
-            dict: Dictionary of parameter names and their calibrated values.
-        """
         result = {}
         for name, param in self.model.params.items():
             if param.dim() == 0:

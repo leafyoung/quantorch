@@ -9,7 +9,7 @@ Option
    torchquantlib.core.asset_pricing.option.asian_option
    torchquantlib.core.asset_pricing.option.black_scholes_merton
    torchquantlib.core.asset_pricing.option.bermudan_option
-   torchquantlib.code.asset_pricing.option.exotics
+   torchquantlib.core.asset_pricing.option.exotics
 
 
 .. automodule:: torchquantlib.core.asset_pricing.option

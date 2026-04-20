@@ -1,17 +1,15 @@
 Quickstart Guide
 ================
 
-This guide will help you get started with TorchQuant quickly.
+This guide shows the smallest supported public API entrypoints for option pricing.
 
-Basic Usage
+Basic usage
 -----------
-
-Here's a simple example of using TorchQuant:
 
 .. code-block:: python
 
    import torch
-   from torchquantlib.core.asset_pricing.option.black_scholes_merton import black_scholes_merton
+   from torchquantlib import black_scholes_merton
 
    spot = torch.tensor(100.0)
    strike = torch.tensor(105.0)
@@ -20,7 +18,33 @@ Here's a simple example of using TorchQuant:
    rate = torch.tensor(0.05)
    dividend = torch.tensor(0.02)
 
-  price = black_scholes_merton('call', 'european', spot, strike, expiry, volatility, rate, dividend)
-  print(f'Option Price: {price.item()}')
+   price = black_scholes_merton(
+       "call",
+       "european",
+       spot,
+       strike,
+       expiry,
+       volatility,
+       rate,
+       dividend,
+   )
+   print(f"Option Price: {price.item()}")
 
-This example demonstrates how to use the Black-Scholes model to price a European call option.
+American option pricing
+-----------------------
+
+.. code-block:: python
+
+   import torch
+   from torchquantlib import american_option
+
+   price = american_option(
+       "put",
+       torch.tensor(100.0),
+       torch.tensor(100.0),
+       torch.tensor(1.0),
+       torch.tensor(0.2),
+       torch.tensor(0.05),
+       100,
+   )
+   print(f"American Option Price: {price.item()}")

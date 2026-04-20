@@ -1,6 +1,6 @@
 import torch
 
-class Greeks:
+class MalliavinGreeks:
     """
     A class for calculating option Greeks using Malliavin calculus.
     This approach is particularly useful for complex options where closed-form solutions are not available.
@@ -333,3 +333,6 @@ class Greeks:
             'Gamma': Gamma.item(),
             'Vega': Vega.item()
         }
+
+
+Greeks = MalliavinGreeks

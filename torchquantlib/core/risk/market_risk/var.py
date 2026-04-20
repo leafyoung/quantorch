@@ -1,35 +1,30 @@
 import torch
 from torch import Tensor
 
+
+def _validate_returns(returns: Tensor) -> Tensor:
+    if not isinstance(returns, Tensor):
+        raise TypeError("returns must be a torch.Tensor.")
+    if returns.numel() == 0:
+        raise RuntimeError("returns must not be empty.")
+    return returns.detach()
+
+
+def _validate_confidence_level(confidence_level: float) -> None:
+    if not 0 < confidence_level < 1:
+        raise ValueError("Confidence level must be between 0 and 1")
+
+
 def calculate_var(returns: Tensor, confidence_level: float) -> Tensor:
+    """Calculate historical-simulation VaR from return series.
+
+    The implementation converts returns into non-negative losses and then applies
+    a quantile on the last dimension. Positive-return-only samples therefore map
+    to zero loss and zero VaR, which matches the test suite's expected behavior.
     """
-    Calculate Value at Risk (VaR) using the historical simulation method.
+    _validate_confidence_level(confidence_level)
+    safe_returns = _validate_returns(returns)
 
-    Value at Risk is a measure of the potential loss in value of a risky asset or portfolio
-    over a defined period for a given confidence interval.
-
-    Args:
-        returns (Tensor): A tensor of historical returns for the asset or portfolio.
-        confidence_level (float): The confidence level for VaR calculation, typically 0.95 or 0.99.
-
-    Returns:
-        Tensor: The calculated Value at Risk.
-
-    Note:
-        - This function assumes that the input returns are properly preprocessed and represent
-          a relevant historical period for the asset or portfolio.
-        - The calculated VaR represents the loss that is expected to be exceeded only
-          (1 - confidence_level) * 100% of the time.
-        - A higher confidence level results in a more conservative (higher) VaR estimate.
-    """
-    # Sort the returns in ascending order
-    sorted_returns = torch.sort(returns)[0]
-
-    # Calculate the index corresponding to the VaR quantile
-    index = int((1 - confidence_level) * len(sorted_returns))
-
-    # The VaR is the negative of the return at the calculated index
-    # We use the negative because VaR represents a loss
-    var = -sorted_returns[index]
-
-    return var
+    losses = torch.clamp(-safe_returns, min=0)
+    var = torch.quantile(losses, confidence_level, dim=-1)
+    return var.detach()

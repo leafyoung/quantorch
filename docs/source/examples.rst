@@ -1,92 +1,62 @@
 Examples
 ========
 
-This section provides examples of how to use TorchQuant for various quantitative finance tasks.
+This section provides short examples built on the supported public API.
 
-Model Calibration
------------------
-
-Here's an example of calibrating a model using TorchQuant:
-
-.. code-block:: python
-
-   # calibrate_heston.py
-
-    import numpy as np
-    import torch
-    from torchquantlib.calibration.model_calibrator import ModelCalibrator
-    from torchquantlib.models.stochastic_volatility.heston import Heston
-
-    # Generate synthetic observed data using true Heston parameters
-    N_observed = 1000
-    S0 = 100.0
-    T = 1.0
-    true_params = {
-        'kappa': 2.0,
-        'theta': 0.04,
-        'sigma_v': 0.3,
-        'rho': -0.7,
-        'v0': 0.04,
-        'mu': 0.05
-    }
-
-    np.random.seed(42)
-    torch.manual_seed(42)
-    heston_true = Heston(**true_params)
-    S_observed = heston_true.simulate(S0=S0, T=T, N=N_observed)
-
-    # Initialize the Heston model with initial guesses
-    heston_model = Heston(
-        kappa_init=1.0,
-        theta_init=0.02,
-        sigma_v_init=0.2,
-        rho_init=-0.5,
-        v0_init=0.02,
-        mu_init=0.0
-    )
-
-    # Set up the calibrator
-    calibrator = ModelCalibrator(
-        model=heston_model,
-        observed_data=S_observed.detach().cpu().numpy(),  # Convert tensor to numpy array
-        S0=S0,
-        T=T,
-        lr=0.01
-    )
-
-    # Calibrate the model
-    calibrator.calibrate(num_epochs=1000, steps=100, verbose=True)
-
-    # Get the calibrated parameters
-    calibrated_params = calibrator.get_calibrated_params()
-    print("Calibrated Parameters:")
-    for name, value in calibrated_params.items():
-        print(f"{name}: {value:.6f}")
-
-
-American_option Pricing
+Model calibration
 -----------------
 
 .. code-block:: python
 
-   # calibrate_heston.py
+   import numpy as np
    import torch
-   from torchquantlib.core.asset_pricing.option.american_option import american_option
-   
+   from torchquantlib import Heston, ModelCalibrator
+
+   N_observed = 1000
+   S0 = 100.0
+   T = 1.0
+
+   np.random.seed(42)
+   torch.manual_seed(42)
+
+   heston_true = Heston(kappa_init=2.0, theta_init=0.04, sigma_v_init=0.3, rho_init=-0.7, v0_init=0.04, mu_init=0.05)
+   observed = heston_true.simulate(S0=S0, T=T, N=N_observed)
+
+   calibrator = ModelCalibrator(
+       model=Heston(),
+       observed_data=observed.detach().cpu().numpy(),
+       S0=S0,
+       T=T,
+       lr=0.01,
+   )
+   calibrator.calibrate(num_epochs=100, steps=100, verbose=False)
+   print(calibrator.get_calibrated_params())
+
+Option pricing
+--------------
+
+.. code-block:: python
+
+   import torch
+   from torchquantlib import american_option, asian_option, bermudan_option
+
    spot = torch.tensor(100.0)
    strike = torch.tensor(105.0)
    expiry = torch.tensor(1.0)
    volatility = torch.tensor(0.2)
    rate = torch.tensor(0.05)
-   steps = 100
-   
-   price = american_option('call', spot, strike, expiry, volatility, rate, steps)
-   print(f'Option Price: {price.item()}')
 
-  
-    np.random.seed(42)
-    torch.manual_seed(42)
-    heston_true = Heston(**true_params)
-    S_observed = heston_true.simulate(S0=S0, T=T, N=N_observed)
+   american_price = american_option("call", spot, strike, expiry, volatility, rate, 100)
+   asian_price = asian_option("call", spot, strike, expiry, volatility, rate, 100)
+   bermudan_price = bermudan_option(
+       "call",
+       spot,
+       strike,
+       expiry,
+       volatility,
+       rate,
+       100,
+       torch.tensor([25, 50, 75]),
+   )
 
-More examples covering different aspects of TorchQuant will be added in future updates.
+   print(american_price.item(), asian_price.item(), bermudan_price.item())

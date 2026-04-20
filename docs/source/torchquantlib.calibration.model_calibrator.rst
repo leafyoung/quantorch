@@ -1,34 +1,36 @@
-ModelCalibrator
-===============
+Model calibration
+=================
 
-Class Description
------------------
+The calibration module provides two public entrypoints:
 
-The ``ModelCalibrator`` class is designed to calibrate a stochastic model using the Sinkhorn divergence. It utilizes the geomloss library for calculating the loss.
+- ``CalibrationConfig`` for explicit configuration
+- ``ModelCalibrator`` for calibration workflows and progress reporting
 
-Parameters
-----------
+.. automodule:: torchquantlib.calibration.model_calibrator
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-- ``model``: The stochastic model to be calibrated.
-- ``observed_data``: The observed market data used for calibration.
-- ``S0`` (optional): Initial value. Default is None.
-- ``T`` (float): Time horizon. Default is 1.0.
-- ``loss_type`` (str): Type of loss function. Default is "sinkhorn".
-- ``p`` (int): Power parameter for the loss function. Default is 2.
-- ``blur`` (float): Blur parameter for the loss function. Default is 0.05.
-- ``optimizer_cls``: Optimizer class. Default is ``torch.optim.Adam``.
-- ``lr`` (float): Learning rate for the optimizer. Default is 0.01.
-
-Methods
+Example
 -------
 
-__init__(self, model, observed_data, S0=None, T=1.0, loss_type="sinkhorn", p=2, blur=0.05, optimizer_cls=optim.Adam, lr=0.01)
-    Initialize the ModelCalibrator with the given parameters.
+.. code-block:: python
 
-calibrate(self, num_epochs=1000, batch_size=None, steps=100, verbose=True)
-    Perform the calibration process.
+   import numpy as np
+   import torch
+   from torchquantlib import Heston, ModelCalibrator
 
-get_calibrated_params(self)
-    Retrieve the calibrated parameters after calibration.
+   np.random.seed(42)
+   torch.manual_seed(42)
 
+   observed = Heston().simulate(S0=100.0, T=1.0, N=1000)
 
+   calibrator = ModelCalibrator(
+       model=Heston(),
+       observed_data=observed.detach().cpu().numpy(),
+       S0=100.0,
+       T=1.0,
+       lr=0.01,
+   )
+   calibrator.calibrate(num_epochs=100, steps=100, verbose=False)
+   print(calibrator.get_calibrated_params())

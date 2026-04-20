@@ -1,56 +1,51 @@
 import torch
 from torch import Tensor
 
+
 def bootstrap_yield_curve(cash_flows: Tensor, prices: Tensor) -> Tensor:
+    """Construct simple yields from cash-flow totals and market prices.
+
+    The helper supports both 2D inputs ``(n_instruments, n_cashflows)`` and batched
+    3D inputs ``(batch, n_instruments, n_cashflows)`` with matching price shapes.
     """
-    Construct a yield curve using the bootstrap method.
+    if not isinstance(cash_flows, Tensor) or not isinstance(prices, Tensor):
+        raise TypeError("cash_flows and prices must be torch.Tensor inputs.")
+    if torch.any(prices <= 0):
+        raise RuntimeError("prices must be strictly positive.")
+    if cash_flows.shape[:-1] != prices.shape:
+        raise RuntimeError("cash_flows and prices must agree on instrument dimensions.")
 
-    The bootstrap method iteratively calculates yields for each maturity,
-    using the previously calculated yields for shorter maturities.
+    cash_flow_totals = cash_flows.sum(dim=-1)
+    num_instruments = cash_flow_totals.shape[-1]
+    periods = torch.arange(1, num_instruments + 1, device=prices.device, dtype=prices.dtype)
 
-    Args:
-        cash_flows (Tensor): A 2D tensor where each row represents the cash flows for an instrument.
-        prices (Tensor): A 1D tensor of market prices for each instrument.
+    view_shape = [1] * cash_flow_totals.ndim
+    view_shape[-1] = num_instruments
+    exponents = (1.0 / periods).reshape(view_shape)
 
-    Returns:
-        Tensor: A 1D tensor of yields corresponding to each maturity.
-
-    Note:
-        This method assumes that the cash flows and prices are sorted by maturity.
-        It also assumes a simple structure where each instrument has a single cash flow at maturity.
-    """
-    n = len(prices)
-    yields = torch.zeros(n)
-    for i in range(n):
-        sum_cfs = torch.sum(cash_flows[:i + 1])
-        # Calculate yield to maturity assuming a single cash flow at maturity
-        yields[i] = (sum_cfs / prices[i]) ** (1 / (i + 1)) - 1
+    yields = torch.pow(cash_flow_totals / prices, exponents) - 1.0
     return yields
+
 
 def nelson_siegel_yield_curve(tau: Tensor, beta0: Tensor, beta1: Tensor, beta2: Tensor) -> Tensor:
-    """
-    Construct a yield curve using the Nelson-Siegel model.
+    """Construct a Nelson-Siegel yield curve with lambda fixed at 1."""
+    if not all(isinstance(value, Tensor) for value in (tau, beta0, beta1, beta2)):
+        raise TypeError("tau, beta0, beta1, and beta2 must be torch.Tensor inputs.")
+    if torch.any(tau <= 0):
+        raise RuntimeError("tau must be strictly positive.")
 
-    The Nelson-Siegel model is a parametric method for modeling the yield curve,
-    using four parameters to generate a smooth and flexible curve shape.
+    tau = tau.to(dtype=torch.float32)
+    beta0 = beta0.to(device=tau.device, dtype=tau.dtype)
+    beta1 = beta1.to(device=tau.device, dtype=tau.dtype)
+    beta2 = beta2.to(device=tau.device, dtype=tau.dtype)
 
-    Args:
-        tau (Tensor): A 1D tensor of time to maturities.
-        beta0 (Tensor): Long-term interest rate level parameter.
-        beta1 (Tensor): Short-term interest rate parameter.
-        beta2 (Tensor): Medium-term interest rate parameter.
+    exp_term = torch.exp(-tau)
+    factor1 = (1 - exp_term) / tau
+    factor2 = factor1 - exp_term
 
-    Returns:
-        Tensor: A 1D tensor of yields corresponding to each maturity in tau.
+    while beta0.ndim < tau.ndim:
+        beta0 = beta0.unsqueeze(-1)
+        beta1 = beta1.unsqueeze(-1)
+        beta2 = beta2.unsqueeze(-1)
 
-    Note:
-        This implementation uses a simplified version of the Nelson-Siegel model
-        where the decay parameter lambda is assumed to be 1.
-    """
-    n = len(tau)
-    yields = torch.zeros(n)
-    for i in range(n):
-        t = tau[i]
-        # Nelson-Siegel yield curve formula
-        yields[i] = beta0 + (beta1 + beta2) * (1 - torch.exp(-t)) / t - beta2 * torch.exp(-t)
-    return yields
+    return beta0 + beta1 * factor1 + beta2 * factor2

@@ -1,5 +1,7 @@
 import torch
-from torchquantlib.models.binomial_tree import binomial_tree
+
+from torchquantlib import binomial_tree
+
 
 spot = torch.tensor(100.0)
 strike = torch.tensor(105.0)
@@ -8,5 +10,5 @@ volatility = torch.tensor(0.2)
 rate = torch.tensor(0.05)
 steps = 100
 
-price = binomial_tree('call', 'european', spot, strike, expiry, volatility, rate, steps)
-print(f'Option Price: {price.item()}')
+price = binomial_tree("call", "european", spot, strike, expiry, volatility, rate, steps)
+print(f"Option Price: {price.item()}")

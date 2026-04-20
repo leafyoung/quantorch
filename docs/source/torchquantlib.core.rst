@@ -1,15 +1,19 @@
 Core
 ====
 
+The core package groups public pricing and risk utilities.
 
-.. toctree::
-   :maxdepth: 4
+.. code-block:: python
 
-   torchquantlib.core.asset_pricing
-   torchquantlib.core.risk
-
+   from torchquantlib import american_option, black_scholes_merton, calculate_var
 
 .. automodule:: torchquantlib.core
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. toctree::
+   :maxdepth: 2
+
+   torchquantlib.core.asset_pricing
+   torchquantlib.core.risk

@@ -1,11 +1,13 @@
 import torch
-from torchquantlib.models.local_volatility.dupire_local_volatility import DupireLocalVol
 
-spots = torch.linspace(80, 120, 10)
-strikes = torch.linspace(80, 120, 10)
-expiries = torch.linspace(0.1, 2.0, 10)
-implied_vols = torch.rand(10, 10) * 0.3
+from torchquantlib import DupireLocalVol
 
-model = DupireLocalVol(spots, strikes, expiries, implied_vols)
-local_vol = model.local_vol(100, 100, 1.0)
-print(f'Local Volatility: {local_vol}')
+
+def local_vol_func(spot, time, device):
+    del time, device
+    return torch.full_like(spot, 0.2)
+
+
+model = DupireLocalVol(local_vol_func)
+terminal_prices = model.simulate(S0=100.0, T=1.0, N=1000, rate=0.05, steps=252)
+print(f"Terminal Prices: {terminal_prices[:5]}")

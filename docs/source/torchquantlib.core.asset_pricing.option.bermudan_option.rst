@@ -52,7 +52,7 @@ Here's a basic example of how to use the bermudan_option function:
 .. code-block:: python
 
    import torch
-   from torchquantlib.core.asset_pricing.option.bermudan_option import bermudan_option
+   from torchquantlib import bermudan_option
 
    # Set option parameters
    option_type = 'call'

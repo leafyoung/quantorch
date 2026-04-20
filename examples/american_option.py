@@ -1,5 +1,7 @@
 import torch
-from torchquantlib.core.asset_pricing.option.american_option import american_option
+
+from torchquantlib import american_option
+
 
 spot = torch.tensor(100.0)
 strike = torch.tensor(105.0)
@@ -8,5 +10,5 @@ volatility = torch.tensor(0.2)
 rate = torch.tensor(0.05)
 steps = 100
 
-price = american_option('call', spot, strike, expiry, volatility, rate, steps)
-print(f'Option Price: {price.item()}')
+price = american_option("call", spot, strike, expiry, volatility, rate, steps)
+print(f"Option Price: {price.item()}")

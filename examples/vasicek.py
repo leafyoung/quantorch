@@ -1,12 +1,13 @@
 import torch
-from torchquantlib.models.interest_rate.vasicek import Vasicek
 
-spot_rate = torch.tensor(0.03)
-kappa = torch.tensor(0.5)
-theta = torch.tensor(0.04)
-sigma = torch.tensor(0.01)
-time = 365
+from torchquantlib import Vasicek
 
-model = Vasicek(spot_rate, kappa, theta, sigma, time)
-rates = model.simulate()
-print(f'Interest Rates: {rates}')
+
+model = Vasicek(
+    kappa_init=0.5,
+    theta_init=0.04,
+    sigma_init=0.01,
+    r0_init=0.03,
+)
+rates = model.simulate(S0=0.0, T=1.0, N=1000, steps=252)
+print(f"Interest Rates: {rates}")

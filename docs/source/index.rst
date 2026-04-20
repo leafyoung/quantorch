@@ -10,6 +10,7 @@ Welcome to TorchQuant's documentation. TorchQuant is a comprehensive quantitativ
    introduction
    installation
    quickstart
+   public_api
    api_reference
    examples
    contributing

@@ -1,10 +1,14 @@
 import torch
-from torchquantlib.core.risk.greeks.greeks import MalliavinGreeks
 
-option_price = torch.tensor(10.0)
-underlying_price = torch.tensor(100.0)
-volatility = torch.tensor(0.2)
-expiry = torch.tensor(1.0)
+from torchquantlib import MalliavinGreeks
 
-greek = MalliavinGreeks(option_price, underlying_price, volatility, expiry)
-print(f'Malliavin Greek: {greek.item()}')
+
+greeks = MalliavinGreeks()
+results = greeks.european_option_greeks(
+    S0=torch.tensor(100.0),
+    K=torch.tensor(100.0),
+    T=torch.tensor(1.0),
+    r=torch.tensor(0.05),
+    sigma=torch.tensor(0.2),
+)
+print(results)

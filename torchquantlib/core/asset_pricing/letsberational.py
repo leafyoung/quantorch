@@ -1,108 +1,91 @@
 import math
+
 import torch
+from torch import Tensor
+
+
+def _ensure_tensor(value, *, device=None, dtype=None) -> Tensor:
+    if isinstance(value, Tensor):
+        tensor = value
+        if device is not None:
+            tensor = tensor.to(device=device)
+        if dtype is not None:
+            tensor = tensor.to(dtype=dtype)
+        return tensor
+    return torch.as_tensor(value, device=device, dtype=dtype or torch.float32)
+
 
 def normal_cdf(x):
-    """
-    Calculate the cumulative distribution function of the standard normal distribution.
+    """Return the standard normal cumulative distribution function."""
+    tensor_x = _ensure_tensor(x)
+    return 0.5 * (1.0 + torch.erf(tensor_x / math.sqrt(2.0)))
 
-    Args:
-        x (torch.Tensor): Input value
-
-    Returns:
-        torch.Tensor: CDF value
-    """
-    return 0.5 * (1 + torch.erf(x / math.sqrt(2)))
 
 def normal_pdf(x):
-    """
-    Calculate the probability density function of the standard normal distribution.
+    """Return the standard normal probability density function."""
+    tensor_x = _ensure_tensor(x)
+    coefficient = torch.as_tensor(0.3989, device=tensor_x.device, dtype=tensor_x.dtype)
+    return coefficient * torch.exp(-0.5 * tensor_x**2)
 
-    Args:
-        x (torch.Tensor): Input value
 
-    Returns:
-        torch.Tensor: PDF value
-    """
-    return torch.exp(-0.5 * x**2) / math.sqrt(2 * math.pi)
+def _black_scholes_price(
+    volatility: Tensor,
+    spot: Tensor,
+    strike: Tensor,
+    expiry: Tensor,
+    rate: Tensor,
+    *,
+    is_call: bool,
+) -> Tensor:
+    sqrt_expiry = torch.sqrt(expiry)
+    d1 = (torch.log(spot / strike) + (rate + 0.5 * volatility**2) * expiry) / (volatility * sqrt_expiry)
+    d2 = d1 - volatility * sqrt_expiry
+    discount_factor = torch.exp(-rate * expiry)
+
+    if is_call:
+        return spot * normal_cdf(d1) - strike * discount_factor * normal_cdf(d2)
+    return strike * discount_factor * normal_cdf(-d2) - spot * normal_cdf(-d1)
+
 
 def implied_volatility(option_price, spot, strike, expiry, rate, is_call=True):
-    """
-    Calculate the implied volatility using the 'Let's be rational' algorithm.
+    """Estimate implied volatility with a robust bisection search."""
+    option_price = _ensure_tensor(option_price, dtype=torch.float32)
+    spot = _ensure_tensor(spot, device=option_price.device, dtype=option_price.dtype)
+    strike = _ensure_tensor(strike, device=option_price.device, dtype=option_price.dtype)
+    expiry = _ensure_tensor(expiry, device=option_price.device, dtype=option_price.dtype)
+    rate = _ensure_tensor(rate, device=option_price.device, dtype=option_price.dtype)
 
-    This function implements a root-finding algorithm to determine the implied volatility
-    that makes the Black-Scholes model price match the observed market price.
+    if option_price.numel() != 1 or spot.numel() != 1 or strike.numel() != 1 or expiry.numel() != 1 or rate.numel() != 1:
+        raise RuntimeError("implied_volatility currently expects scalar tensor inputs.")
+    if option_price.item() <= 0:
+        raise RuntimeError("option_price must be positive.")
+    if spot.item() <= 0 or strike.item() <= 0 or expiry.item() <= 0:
+        raise RuntimeError("spot, strike, and expiry must be positive.")
 
-    Args:
-        option_price (torch.Tensor): The observed option price
-        spot (torch.Tensor): The spot price of the underlying asset
-        strike (torch.Tensor): The strike price of the option
-        expiry (torch.Tensor): The time to expiry in years
-        rate (torch.Tensor): The risk-free interest rate
-        is_call (bool): True for call options, False for put options
+    discount_factor = torch.exp(-rate * expiry)
+    max_price = spot if is_call else strike * discount_factor
+    if option_price.item() >= max_price.item():
+        raise RuntimeError("option_price is outside no-arbitrage bounds.")
 
-    Returns:
-        torch.Tensor: The implied volatility
+    lower = torch.as_tensor(1e-5, device=option_price.device, dtype=option_price.dtype)
+    upper = torch.as_tensor(5.0, device=option_price.device, dtype=option_price.dtype)
+    tolerance = 1e-8
 
-    Note:
-        This implementation uses the Newton-Raphson method for root-finding,
-        with safeguards to ensure convergence.
-    """
-    # Convert tensors to float for internal calculation
-    option_price = option_price.item()
-    spot = spot.item()
-    strike = strike.item()
-    expiry = expiry.item()
-    rate = rate.item()
-    
-    # Calculate the forward price
-    forward = spot * math.exp(rate * expiry)
+    lower_price = _black_scholes_price(lower, spot, strike, expiry, rate, is_call=True)
+    if option_price.item() <= lower_price.item():
+        return lower.detach()
 
-    # Define constants
-    epsilon = 1e-8  # Convergence threshold
-    max_iter = 100  # Maximum number of iterations
-    vol_lower_bound = 1e-5  # Minimum allowed volatility
-    vol_upper_bound = 1  # Maximum allowed volatility
-
-    # Initialize implied volatility guess using a simple approximation
-    implied_vol = math.sqrt(2 * abs((math.log(forward / strike) + rate * expiry) / expiry))
-
-    for _ in range(max_iter):
-        # Ensure volatility stays within bounds
-        implied_vol = max(min(implied_vol, vol_upper_bound), vol_lower_bound)
-
-        # Calculate d1 and d2 parameters
-        d1 = (math.log(forward / strike) + 0.5 * implied_vol**2 * expiry) / (implied_vol * math.sqrt(expiry))
-        d2 = d1 - implied_vol * math.sqrt(expiry)
-
-        # Calculate model price based on current volatility guess
-        if is_call:
-            model_price = forward * normal_cdf(d1) - strike * normal_cdf(d2)
-        else:
-            model_price = strike * normal_cdf(-d2) - forward * normal_cdf(-d1)
-
-        # Calculate vega (sensitivity of option price to volatility)
-        vega = forward * math.sqrt(expiry) * normal_pdf(d1)
-
-        # Calculate price difference
+    for _ in range(100):
+        mid = 0.5 * (lower + upper)
+        model_price = _black_scholes_price(mid, spot, strike, expiry, rate, is_call=True)
         price_diff = model_price - option_price
 
-        # Check for convergence
-        if abs(price_diff) < epsilon:
-            return torch.tensor(implied_vol)
+        if torch.abs(price_diff).item() < tolerance:
+            return mid.detach()
 
-        # Update volatility guess using Newton-Raphson method
-        implied_vol -= price_diff / vega
+        if price_diff.item() > 0:
+            upper = mid
+        else:
+            lower = mid
 
-    # Return best guess if max iterations reached
-    return torch.tensor(implied_vol)
-
-# Example usage
-if __name__ == "__main__":
-    option_price = torch.tensor(10.0)
-    spot = torch.tensor(100.0)
-    strike = torch.tensor(105.0)
-    expiry = torch.tensor(1.0)
-    rate = torch.tensor(0.05)
-
-    volatility = implied_volatility(option_price, spot, strike, expiry, rate, is_call=True)
-    print(f'Implied Volatility: {volatility.item()}')
+    raise RuntimeError("implied_volatility failed to converge.")

@@ -1,4 +1,4 @@
-seq2seq_pde_solver
+Seq2Seq PDE Solver
 ==================
 
 .. automodule:: torchquantlib.utils.seq2seq_pde_solver
@@ -11,50 +11,22 @@ seq2seq_pde_solver
    :undoc-members:
    :show-inheritance:
 
-   .. automethod:: __init__
+Example
+-------
 
-   .. rubric:: Methods
+.. code-block:: python
 
-   .. automethod:: forward
-   .. automethod:: train_step
-   .. automethod:: validate_step
-   .. automethod:: configure_optimizers
+   import torch
+   from torchquantlib import Seq2SeqPDESolver
 
-   .. rubric:: Attributes
+   model = Seq2SeqPDESolver(input_dim=1, hidden_dim=64, output_dim=1, num_layers=2)
+   src = torch.randn(8, 20, 1)
+   trg = torch.randn(8, 20, 1)
+   output = model(src, trg)
+   print(output.shape)
 
-   .. autoattribute:: encoder
-   .. autoattribute:: decoder
-   .. autoattribute:: criterion
+Notes
+-----
 
-   .. rubric:: Example Usage
-
-   .. code-block:: python
-
-      import torch
-      from torchquantlib.utils.seq2seq_pde_solver import Seq2SeqPDESolver
-
-      # Define your encoder and decoder architectures
-      encoder = YourEncoderClass(...)
-      decoder = YourDecoderClass(...)
-
-      # Initialize the Seq2SeqPDESolver
-      pde_solver = Seq2SeqPDESolver(encoder, decoder)
-
-      # Prepare your input data
-      input_data = torch.randn(batch_size, sequence_length, input_dim)
-
-      # Solve the PDE
-      output = pde_solver(input_data)
-
-   .. note::
-      Make sure to replace `YourEncoderClass` and `YourDecoderClass` with your actual encoder and decoder implementations.
-
-.. autoclass:: torchquantlib.utils.seq2seq_pde_solver.Encoder
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. autoclass:: torchquantlib.utils.seq2seq_pde_solver.Decoder
-   :members:
-   :undoc-members:
-   :show-inheritance:
+- The current public utility is the ``Seq2SeqPDESolver`` class itself.
+- The module does not expose separate ``Encoder`` or ``Decoder`` public classes.

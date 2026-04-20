@@ -1,39 +1,64 @@
+import math
+
 import torch
 from torch import Tensor
-from scipy.stats import norm
 
-def black_scholes_merton(option_type: str, option_style: str, spot: Tensor, strike: Tensor, expiry: Tensor, volatility: Tensor, rate: Tensor, dividend: Tensor) -> Tensor:
+
+def _deterministic_option_value(
+    option_type: str,
+    spot: Tensor,
+    strike: Tensor,
+    expiry: Tensor,
+    rate: Tensor,
+    dividend: Tensor,
+) -> Tensor:
+    forward_spot = spot * torch.exp((rate - dividend) * expiry)
+    discount_factor = torch.exp(-rate * expiry)
+
+    if option_type == "call":
+        return discount_factor * torch.maximum(forward_spot - strike, torch.zeros_like(spot))
+    return discount_factor * torch.maximum(strike - forward_spot, torch.zeros_like(spot))
+
+
+def black_scholes_merton(
+    option_type: str,
+    option_style: str,
+    spot: Tensor,
+    strike: Tensor,
+    expiry: Tensor,
+    volatility: Tensor,
+    rate: Tensor,
+    dividend: Tensor,
+) -> Tensor:
+    """Price a Black-Scholes-Merton option.
+
+    ``option_style='american'`` uses a simple lower-bounded approximation: the
+    returned value is at least the European price and at least the intrinsic value.
     """
-    Price an option using the Black-Scholes-Merton model.
+    if option_type not in {"call", "put"}:
+        raise ValueError("option_type must be either 'call' or 'put'.")
+    if option_style not in {"european", "american"}:
+        raise ValueError("option_style must be either 'european' or 'american'.")
+    if volatility.item() <= 0:
+        european_price = _deterministic_option_value(option_type, spot, strike, expiry, rate, dividend)
+    else:
+        sqrt_expiry = torch.sqrt(expiry)
+        d1 = (torch.log(spot / strike) + (rate - dividend + 0.5 * volatility**2) * expiry) / (volatility * sqrt_expiry)
+        d2 = d1 - volatility * sqrt_expiry
 
-    This function implements the Black-Scholes-Merton model to price European and American options on dividend-paying stocks.
+        normal_cdf_d1 = 0.5 * (1 + torch.erf(d1 / math.sqrt(2)))
+        normal_cdf_d2 = 0.5 * (1 + torch.erf(d2 / math.sqrt(2)))
 
-    Args:
-        option_type (str): Type of option - either 'call' or 'put'.
-        option_style (str): Style of option - either 'european' or 'american'.
-        spot (Tensor): Current price of the underlying asset.
-        strike (Tensor): Strike price of the option.
-        expiry (Tensor): Time to expiration in years.
-        volatility (Tensor): Volatility of the underlying asset.
-        rate (Tensor): Risk-free interest rate (annualized).
-        dividend (Tensor): Continuous dividend yield of the underlying asset.
+        if option_type == "call":
+            european_price = spot * torch.exp(-dividend * expiry) * normal_cdf_d1 - strike * torch.exp(-rate * expiry) * normal_cdf_d2
+        else:
+            european_price = strike * torch.exp(-rate * expiry) * (1 - normal_cdf_d2) - spot * torch.exp(-dividend * expiry) * (1 - normal_cdf_d1)
 
-    Returns:
-        Tensor: The price of the option.
+    if option_style == "european":
+        return european_price
 
-    Note:
-        - This implementation uses the Black-Scholes-Merton formula for European options.
-        - For American options, it uses a simple approximation that may not be accurate in all cases.
-        - For more accurate pricing of American options, especially puts on dividend-paying stocks,
-          numerical methods like binomial trees or finite difference methods are recommended.
-    """
-    # Calculate d1 and d2 parameters
-    d1 = (torch.log(spot / strike) + (rate - dividend + 0.5 * volatility ** 2) * expiry) / (volatility * torch.sqrt(expiry))
-    d2 = d1 - volatility * torch.sqrt(expiry)
-    
-    if option_type == 'call':
-        price = spot * torch.exp(-dividend * expiry) * norm.cdf(d1) - strike * torch.exp(-rate * expiry) * norm.cdf(d2)
-    elif option_type == 'put':
-        price = strike * torch.exp(-rate * expiry) * norm.cdf(-d2) - spot * torch.exp(-dividend * expiry) * norm.cdf(-d1)
-    
-    return price
+    intrinsic_value = torch.maximum(spot - strike, torch.zeros_like(spot)) if option_type == "call" else torch.maximum(strike - spot, torch.zeros_like(spot))
+    return torch.maximum(european_price, intrinsic_value)
+
+
+__all__ = ["black_scholes_merton"]

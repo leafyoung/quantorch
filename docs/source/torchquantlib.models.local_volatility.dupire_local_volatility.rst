@@ -43,7 +43,7 @@ Dupire Local Volatility Model
    .. code-block:: python
 
       import torch
-      from torchquantlib.models.local_volatility.dupire_local_volatility import DupireLocalVol
+      from torchquantlib import DupireLocalVol
 
       # Define a simple local volatility function
       def local_vol_func(S, t):
