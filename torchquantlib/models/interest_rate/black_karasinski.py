@@ -23,20 +23,19 @@ class BlackKarasinski(StochasticModel):
         )
 
     def simulate(self, S0, T, N, steps=100):
-        dt = self.tensor(T / steps)
-        a = self.constrained_param("a")
-        sigma = self.constrained_param("sigma")
-        r0 = self.params["r0"]
+        del S0, steps
+        horizon = self.tensor(T)
+        a = torch.clamp(self.params["a"], min=0)
+        sigma = torch.clamp(self.params["sigma"], min=0)
+        r0 = torch.clamp(self.params["r0"], min=1e-8)
 
         N = int(N)
-        steps = int(steps)
+        log_r0 = torch.log(r0)
+        mean = log_r0 * torch.exp(-a * horizon)
 
-        log_r = torch.zeros(N, steps, device=self.device)
-        log_r[:, 0] = torch.log(r0)
+        if sigma.item() == 0:
+            return torch.exp(mean).expand(N)
 
-        for t in range(1, steps):
-            log_r_t_minus = log_r[:, t - 1]
-            dlog_r = -a * log_r_t_minus * dt + sigma * torch.sqrt(dt) * torch.randn(N, device=self.device)
-            log_r[:, t] = log_r_t_minus + dlog_r
-
-        return torch.exp(log_r[:, -1])
+        variance = sigma**2 * (1 - torch.exp(-2 * a * horizon)) / torch.clamp(2 * a, min=1e-12)
+        noise = torch.randn(N, device=self.device, dtype=mean.dtype)
+        return torch.exp(mean + torch.sqrt(torch.clamp(variance, min=0)) * noise)

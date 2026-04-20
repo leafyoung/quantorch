@@ -94,7 +94,8 @@ class MalliavinGreeks:
         ST = S0 * torch.exp((r - 0.5 * sigma**2) * T + sigma * torch.sqrt(dt) * z)
 
         # Approximate Dirac delta function
-        delta_approx = (1 / (epsilon * torch.sqrt(2 * torch.pi))) * torch.exp(-0.5 * ((ST - K) / epsilon)**2)
+        normalizer = epsilon * torch.sqrt(torch.as_tensor(2.0 * torch.pi, device=self.device))
+        delta_approx = (1 / normalizer) * torch.exp(-0.5 * ((ST - K) / epsilon)**2)
         discount_factor = torch.exp(-r * T)
 
         # Malliavin derivatives
@@ -175,7 +176,7 @@ class MalliavinGreeks:
             'Vega': Vega.item()
         }
 
-    def lookback_option_delta(self, S0, T, r, sigma, num_paths=100000, num_steps=50, seed=42):
+    def lookback_option_delta(self, S0, T, r, sigma, num_paths=100000, num_steps=50, seed=42, **kwargs):
         """
         Calculate Delta for Lookback options using Malliavin calculus.
 
@@ -240,10 +241,10 @@ class MalliavinGreeks:
         torch.manual_seed(seed)
 
         num_assets = len(S0)
-        S0 = torch.tensor(S0, device=self.device)
-        sigma = torch.tensor(sigma, device=self.device)
-        rho = torch.tensor(rho, device=self.device)
-        weights = torch.tensor(weights, device=self.device)
+        S0 = torch.as_tensor(S0, device=self.device)
+        sigma = torch.as_tensor(sigma, device=self.device)
+        rho = torch.as_tensor(rho, device=self.device)
+        weights = torch.as_tensor(weights, device=self.device)
 
         # Cholesky decomposition for correlated random numbers
         L = torch.linalg.cholesky(rho)

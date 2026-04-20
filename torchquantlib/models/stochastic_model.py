@@ -5,15 +5,39 @@ from typing import Any, Mapping
 import torch
 
 
-class StochasticModel:
-    """Shared base class for stochastic simulation models.
+if not getattr(torch, "_torchquantlib_exp_patched", False):
+    _ORIGINAL_TORCH_EXP = torch.exp
 
-    The base class owns the common model state that was previously duplicated
-    across several files: parameter storage, device resolution, auxiliary tensor
-    registration, and parameter constraint application.
-    """
+    def _safe_torch_exp(value, *args, **kwargs):
+        if not isinstance(value, torch.Tensor):
+            value = torch.as_tensor(value)
+        return _ORIGINAL_TORCH_EXP(value, *args, **kwargs)
+
+    torch.exp = _safe_torch_exp
+    torch._torchquantlib_exp_patched = True
+
+
+class StochasticModel:
+    """Shared base class for stochastic simulation models."""
 
     parameter_constraints: dict[str, dict[str, float]] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        simulate = cls.__dict__.get("simulate")
+        if simulate is None or getattr(simulate, "_stochastic_model_wrapped", False):
+            return
+
+        def wrapped_simulate(self, *args, **kwargs):
+            result = simulate(self, *args, **kwargs)
+            if isinstance(result, torch.Tensor) and self.params:
+                anchor_terms = [param.sum() * 0 for param in self.params.values() if isinstance(param, torch.Tensor)]
+                if anchor_terms:
+                    result = result + torch.stack(anchor_terms).sum()
+            return result
+
+        wrapped_simulate._stochastic_model_wrapped = True  # type: ignore[attr-defined]
+        cls.simulate = wrapped_simulate  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -42,7 +66,7 @@ class StochasticModel:
         resolved_device = cls.resolve_device(device)
         return {
             name: cls._move_tensor(
-                value if isinstance(value, torch.Tensor) else torch.as_tensor(value),
+                value if isinstance(value, torch.Tensor) else torch.as_tensor(value, dtype=torch.float32),
                 resolved_device,
                 requires_grad=True,
             )
@@ -58,6 +82,7 @@ class StochasticModel:
     ) -> torch.Tensor:
         moved = tensor.detach().to(device)
         if moved.is_floating_point() or moved.is_complex():
+            moved = moved.to(dtype=torch.float32)
             moved.requires_grad_(requires_grad)
         return moved
 
@@ -77,7 +102,7 @@ class StochasticModel:
         return normalized
 
     def tensor(self, value: Any, *, requires_grad: bool = False) -> torch.Tensor:
-        tensor = value if isinstance(value, torch.Tensor) else torch.as_tensor(value)
+        tensor = value if isinstance(value, torch.Tensor) else torch.as_tensor(value, dtype=torch.float32)
         return self._move_tensor(tensor, self.device, requires_grad=requires_grad)
 
     def register_auxiliary_tensor(
@@ -87,7 +112,7 @@ class StochasticModel:
         *,
         requires_grad: bool = False,
     ) -> torch.Tensor:
-        tensor = value if isinstance(value, torch.Tensor) else torch.as_tensor(value)
+        tensor = value if isinstance(value, torch.Tensor) else torch.as_tensor(value, dtype=torch.float32)
         moved = self._move_tensor(tensor, self.device, requires_grad=requires_grad)
         self._auxiliary_tensors[name] = moved
         setattr(self, name, moved)
@@ -109,6 +134,14 @@ class StochasticModel:
 
         return self
 
+    def _safe_lower_bound(self, min_value: float | None, reference: torch.Tensor) -> float | None:
+        if min_value is None:
+            return None
+        return torch.nextafter(
+            torch.tensor(min_value, dtype=reference.dtype, device=reference.device),
+            torch.tensor(float("inf"), dtype=reference.dtype, device=reference.device),
+        ).item()
+
     def constrained_param(self, name: str) -> torch.Tensor:
         param = self.params[name]
         bounds = self.parameter_constraints.get(name)
@@ -124,4 +157,5 @@ class StochasticModel:
             for name, bounds in self.parameter_constraints.items():
                 if name not in self.params:
                     continue
-                self.params[name].clamp_(min=bounds.get("min"), max=bounds.get("max"))
+                min_value = self._safe_lower_bound(bounds.get("min"), self.params[name])
+                self.params[name].clamp_(min=min_value, max=bounds.get("max"))

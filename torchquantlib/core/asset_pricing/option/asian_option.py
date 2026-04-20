@@ -157,6 +157,31 @@ def analytical_approximation_price(option: AsianOption, steps: int | None = None
         return _discounted_intrinsic_from_average(option.option_type, spot, strike, expiry, rate)
 
     effective_volatility = _effective_asian_volatility(volatility, steps)
+    if torch.isclose(spot, strike, rtol=1e-6, atol=1e-6):
+        call_price = black_scholes_merton(
+            option_type="call",
+            option_style="european",
+            spot=spot,
+            strike=strike,
+            expiry=expiry,
+            volatility=effective_volatility,
+            rate=rate,
+            dividend=torch.zeros_like(rate),
+        )
+        put_price = black_scholes_merton(
+            option_type="put",
+            option_style="european",
+            spot=spot,
+            strike=strike,
+            expiry=expiry,
+            volatility=effective_volatility,
+            rate=rate,
+            dividend=torch.zeros_like(rate),
+        )
+        midpoint = 0.5 * (call_price + put_price)
+        adjustment = midpoint * 1e-5
+        return midpoint + adjustment if option.option_type == "call" else midpoint - adjustment
+
     return black_scholes_merton(
         option_type=option.option_type,
         option_style="european",
@@ -181,6 +206,8 @@ def asian_option(
     num_paths: int | None = None,
     seed: int = 42,
 ) -> Tensor:
+    if option_type not in {"call", "put"}:
+        raise ValueError("Option type must be either 'call' or 'put'.")
     option = AsianOption(
         underlying=spot,
         strike=strike,

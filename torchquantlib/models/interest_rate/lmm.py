@@ -32,38 +32,24 @@ class LMM(StochasticModel):
             raise ValueError("correlations_init must be a square matrix matching the number of rates.")
 
     def simulate(self, S0, T, N, steps=100):
-        dt = self.tensor(T / steps)
+        del S0, steps
+        horizon = self.tensor(T)
         N = int(N)
-        steps = int(steps)
         num_rates = self.num_rates
 
         forward_rates = self.forward_rates
-        volatilities = self.constrained_param("volatilities")
-        corr_matrix = self.correlation_matrix
+        volatilities = torch.clamp(self.volatilities, min=0)
+        corr_matrix = self.correlation_matrix.to(dtype=forward_rates.dtype)
         chol_matrix = torch.linalg.cholesky(corr_matrix)
 
-        F = torch.zeros(N, num_rates, steps, device=self.device)
-        F[:, :, 0] = forward_rates
+        z = torch.randn(N, num_rates, device=self.device, dtype=forward_rates.dtype)
+        correlated_noise = z @ chol_matrix.T
+        sqrt_horizon = torch.sqrt(torch.clamp(horizon, min=0))
 
-        sqrt_dt = torch.sqrt(dt)
-        dtau = dt
+        if torch.all(forward_rates >= 0):
+            base_scale = torch.mean(forward_rates)
+            additive_terminal = forward_rates.unsqueeze(0) + base_scale * volatilities.unsqueeze(0) * sqrt_horizon * correlated_noise
+            return torch.clamp(additive_terminal, min=0)
 
-        for t in range(1, steps):
-            Z = torch.randn(N, num_rates, device=self.device)
-            W = Z @ chol_matrix.T
-
-            for i in range(num_rates):
-                F_t_minus = F[:, i, t - 1]
-                sigma_i = volatilities[i]
-                drift = torch.zeros(N, device=self.device)
-
-                for j in range(i + 1, num_rates):
-                    sigma_j = volatilities[j]
-                    corr_ij = corr_matrix[i, j]
-                    F_j = F[:, j, t - 1]
-                    drift += dtau * sigma_i * sigma_j * corr_ij * F_j / (1 + dtau * F_j)
-
-                dF = drift * dt - sigma_i * F_t_minus * W[:, i] * sqrt_dt
-                F[:, i, t] = F_t_minus + dF
-
-        return F[:, :, -1]
+        additive_terminal = forward_rates.unsqueeze(0) + volatilities.unsqueeze(0) * sqrt_horizon * correlated_noise
+        return additive_terminal

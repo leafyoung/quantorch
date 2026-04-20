@@ -23,20 +23,18 @@ class HullWhiteModel(StochasticModel):
         )
 
     def simulate(self, S0, T, N, steps=100):
-        dt = self.tensor(T / steps)
-        a = self.constrained_param("a")
-        sigma = self.constrained_param("sigma")
+        del S0, steps
+        horizon = self.tensor(T)
+        a = torch.clamp(self.params["a"], min=0)
+        sigma = torch.clamp(self.params["sigma"], min=0)
         r0 = self.params["r0"]
 
         N = int(N)
-        steps = int(steps)
+        mean = r0 * torch.exp(-a * horizon)
 
-        r = torch.zeros(N, steps, device=self.device)
-        r[:, 0] = r0
+        if sigma.item() == 0:
+            return mean.expand(N)
 
-        for t in range(1, steps):
-            r_t_minus = r[:, t - 1]
-            dr = -a * r_t_minus * dt + sigma * torch.sqrt(dt) * torch.randn(N, device=self.device)
-            r[:, t] = r_t_minus + dr
-
-        return r[:, -1]
+        variance = sigma**2 * (1 - torch.exp(-2 * a * horizon)) / torch.clamp(2 * a, min=1e-12)
+        noise = torch.randn(N, device=self.device, dtype=mean.dtype)
+        return mean + torch.sqrt(torch.clamp(variance, min=0)) * noise
