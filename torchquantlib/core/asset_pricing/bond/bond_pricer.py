@@ -152,6 +152,8 @@ def convertible_bond_lattice(
     dividend_yield: Tensor | None = None,
     call_price: Tensor | None = None,
     call_period: Tensor | None = None,
+    put_price: Tensor | None = None,
+    put_period: Tensor | None = None,
 ) -> Tensor:
     period_count = max(1, int(periods.item()))
     dtype = face_value.dtype
@@ -164,20 +166,26 @@ def convertible_bond_lattice(
     dividend = torch.zeros((), device=device, dtype=dtype) if dividend_yield is None else dividend_yield.to(device=device, dtype=dtype)
 
     dt = torch.tensor(1.0, device=device, dtype=dtype)
-    exercise_index = None if call_period is None else max(1, min(int(call_period.item()), period_count))
+    call_index = None if call_period is None else max(1, min(int(call_period.item()), period_count))
     call_value = None if call_price is None else call_price.to(device=device, dtype=dtype)
+    put_index = None if put_period is None else max(1, min(int(put_period.item()), period_count))
+    put_value = None if put_price is None else put_price.to(device=device, dtype=dtype)
 
     if volatility.item() == 0:
         growth = torch.exp((rate_tensor - dividend) * dt)
         terminal_stock = stock0 * growth**period_count
         terminal_value = torch.maximum(face_value, conversion_ratio * terminal_stock)
-        if call_value is not None and exercise_index == period_count:
+        if call_value is not None and call_index == period_count:
             terminal_value = torch.minimum(terminal_value, call_value)
+        if put_value is not None and put_index == period_count:
+            terminal_value = torch.maximum(terminal_value, put_value)
         continuation = torch.full((period_count + 1,), terminal_value.item(), device=device, dtype=dtype)
         for step in range(period_count - 1, -1, -1):
             continuation = (coupon + continuation[:-1]) / torch.clamp(1.0 + rate_tensor, min=EPSILON)
-            if call_value is not None and exercise_index is not None and step + 1 == exercise_index:
+            if call_value is not None and call_index is not None and step + 1 == call_index:
                 continuation = torch.minimum(continuation, call_value)
+            if put_value is not None and put_index is not None and step + 1 == put_index:
+                continuation = torch.maximum(continuation, put_value)
         return continuation[0]
 
     up = torch.exp(volatility * torch.sqrt(dt))
@@ -187,8 +195,10 @@ def convertible_bond_lattice(
 
     terminal_stock = stock0 * (up ** torch.arange(period_count, -1, -1, device=device, dtype=dtype)) * (down ** torch.arange(0, period_count + 1, device=device, dtype=dtype))
     continuation = torch.maximum(face_value * torch.ones_like(terminal_stock), conversion_ratio * terminal_stock)
-    if call_value is not None and exercise_index == period_count:
+    if call_value is not None and call_index == period_count:
         continuation = torch.minimum(continuation, call_value)
+    if put_value is not None and put_index == period_count:
+        continuation = torch.maximum(continuation, put_value)
 
     for step in range(period_count - 1, -1, -1):
         stock_nodes = stock0 * (up ** torch.arange(step, -1, -1, device=device, dtype=dtype)) * (down ** torch.arange(0, step + 1, device=device, dtype=dtype))
@@ -196,8 +206,10 @@ def convertible_bond_lattice(
         hold_value = (coupon + expected_next) / torch.clamp(1.0 + rate_tensor, min=EPSILON)
         conversion_value = conversion_ratio * stock_nodes
         node_value = torch.maximum(hold_value, conversion_value)
-        if call_value is not None and exercise_index is not None and step + 1 == exercise_index:
+        if call_value is not None and call_index is not None and step + 1 == call_index:
             node_value = torch.minimum(node_value, call_value)
+        if put_value is not None and put_index is not None and step + 1 == put_index:
+            node_value = torch.maximum(node_value, put_value)
         continuation = node_value
 
     return continuation[0]
@@ -230,6 +242,33 @@ def callable_convertible_bond_lattice(
     )
 
 
+def putable_convertible_bond_lattice(
+    face_value: Tensor,
+    coupon_rate: Tensor,
+    rate: Tensor,
+    periods: Tensor,
+    conversion_ratio: Tensor,
+    stock_price: Tensor,
+    stock_volatility: Tensor,
+    put_price: Tensor,
+    put_period: Tensor,
+    *,
+    dividend_yield: Tensor | None = None,
+) -> Tensor:
+    return convertible_bond_lattice(
+        face_value,
+        coupon_rate,
+        rate,
+        periods,
+        conversion_ratio,
+        stock_price,
+        stock_volatility,
+        dividend_yield=dividend_yield,
+        put_price=put_price,
+        put_period=put_period,
+    )
+
+
 def stochastic_rate_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: Tensor) -> Tensor:
     coupon = face_value * coupon_rate
     period_count = max(1, int(periods.item()))
@@ -245,6 +284,7 @@ __all__ = [
     "callable_convertible_bond_lattice",
     "convertible_bond",
     "convertible_bond_lattice",
+    "putable_convertible_bond_lattice",
     "coupon_bond",
     "putable_bond",
     "putable_bond_lattice",

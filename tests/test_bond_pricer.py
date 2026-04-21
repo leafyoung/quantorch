@@ -7,6 +7,7 @@ from torchquantlib.core.asset_pricing.bond.bond_pricer import (
     callable_bond_lattice,
     callable_convertible_bond_lattice,
     putable_bond,
+    putable_convertible_bond_lattice,
     putable_bond_lattice,
     convertible_bond,
     convertible_bond_lattice,
@@ -194,3 +195,27 @@ def test_callable_convertible_bond_lattice_is_not_more_valuable_than_noncallable
         stock_volatility=torch.tensor(0.25),
     )
     assert callable_price <= noncallable_price
+
+
+def test_putable_convertible_bond_lattice_is_not_less_valuable_than_nonputable_version():
+    putable_price = putable_convertible_bond_lattice(
+        face_value=torch.tensor(1000.0),
+        coupon_rate=torch.tensor(0.03),
+        rate=torch.tensor(0.04),
+        periods=torch.tensor(5),
+        conversion_ratio=torch.tensor(8.0),
+        stock_price=torch.tensor(120.0),
+        stock_volatility=torch.tensor(0.25),
+        put_price=torch.tensor(1050.0),
+        put_period=torch.tensor(3),
+    )
+    nonputable_price = convertible_bond_lattice(
+        face_value=torch.tensor(1000.0),
+        coupon_rate=torch.tensor(0.03),
+        rate=torch.tensor(0.04),
+        periods=torch.tensor(5),
+        conversion_ratio=torch.tensor(8.0),
+        stock_price=torch.tensor(120.0),
+        stock_volatility=torch.tensor(0.25),
+    )
+    assert putable_price >= nonputable_price

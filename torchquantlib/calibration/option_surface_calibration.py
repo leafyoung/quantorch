@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import torch
 
@@ -34,6 +34,13 @@ class OptionSurfaceQuote:
 class OptionSurfaceCalibrationResult:
     calibrator: MarketCalibrator
     result: MarketCalibrationResult
+
+
+@dataclass(frozen=True)
+class OptionSurfaceMultiStartResult:
+    best: OptionSurfaceCalibrationResult
+    runs: tuple[OptionSurfaceCalibrationResult, ...]
+    final_losses: tuple[float, ...]
 
 
 def _quote_name(quote: OptionSurfaceQuote) -> str:
@@ -144,9 +151,40 @@ def calibrate_option_surface(
     return OptionSurfaceCalibrationResult(calibrator=calibrator, result=result)
 
 
+def calibrate_option_surface_multistart(
+    model_factory: Callable[[], Any],
+    quotes: Sequence[OptionSurfaceQuote],
+    *,
+    starts: int = 3,
+    num_epochs: int = 100,
+    verbose: bool = True,
+    **market_calibrator_kwargs,
+) -> OptionSurfaceMultiStartResult:
+    runs: list[OptionSurfaceCalibrationResult] = []
+    for _ in range(max(1, int(starts))):
+        model = model_factory()
+        runs.append(
+            calibrate_option_surface(
+                model,
+                quotes,
+                num_epochs=num_epochs,
+                verbose=verbose,
+                **market_calibrator_kwargs,
+            )
+        )
+    best = min(runs, key=lambda run: run.result.final_loss)
+    return OptionSurfaceMultiStartResult(
+        best=best,
+        runs=tuple(runs),
+        final_losses=tuple(run.result.final_loss for run in runs),
+    )
+
+
 __all__ = [
     "OptionSurfaceCalibrationResult",
+    "OptionSurfaceMultiStartResult",
     "OptionSurfaceQuote",
     "build_option_surface_instruments",
     "calibrate_option_surface",
+    "calibrate_option_surface_multistart",
 ]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import torch
 
@@ -23,6 +23,13 @@ class YieldCurvePoint:
 class YieldCurveCalibrationResult:
     calibrator: MarketCalibrator
     result: MarketCalibrationResult
+
+
+@dataclass(frozen=True)
+class YieldCurveMultiStartResult:
+    best: YieldCurveCalibrationResult
+    runs: tuple[YieldCurveCalibrationResult, ...]
+    final_losses: tuple[float, ...]
 
 
 def _point_name(point: YieldCurvePoint) -> str:
@@ -72,9 +79,40 @@ def calibrate_yield_curve(
     return YieldCurveCalibrationResult(calibrator=calibrator, result=result)
 
 
+def calibrate_yield_curve_multistart(
+    model_factory: Callable[[], Any],
+    points: Sequence[YieldCurvePoint],
+    *,
+    starts: int = 3,
+    num_epochs: int = 100,
+    verbose: bool = True,
+    **market_calibrator_kwargs,
+) -> YieldCurveMultiStartResult:
+    runs: list[YieldCurveCalibrationResult] = []
+    for _ in range(max(1, int(starts))):
+        model = model_factory()
+        runs.append(
+            calibrate_yield_curve(
+                model,
+                points,
+                num_epochs=num_epochs,
+                verbose=verbose,
+                **market_calibrator_kwargs,
+            )
+        )
+    best = min(runs, key=lambda run: run.result.final_loss)
+    return YieldCurveMultiStartResult(
+        best=best,
+        runs=tuple(runs),
+        final_losses=tuple(run.result.final_loss for run in runs),
+    )
+
+
 __all__ = [
     "YieldCurveCalibrationResult",
+    "YieldCurveMultiStartResult",
     "YieldCurvePoint",
     "build_yield_curve_instruments",
     "calibrate_yield_curve",
+    "calibrate_yield_curve_multistart",
 ]
