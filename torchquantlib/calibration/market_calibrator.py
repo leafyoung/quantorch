@@ -57,6 +57,7 @@ class MarketCalibrationResult:
     objective_decomposition: dict[str, float] = field(default_factory=dict)
     predictions: dict[str, float] = field(default_factory=dict)
     targets: dict[str, float] = field(default_factory=dict)
+    residual_summary: dict[str, float] = field(default_factory=dict)
 
 
 class MarketCalibrator:
@@ -148,6 +149,17 @@ class MarketCalibrator:
                 targets[instrument.name] = float(target.item())
         return residuals, predictions, targets
 
+    @staticmethod
+    def _residual_summary(residuals: dict[str, float]) -> dict[str, float]:
+        if not residuals:
+            return {"mae": 0.0, "rmse": 0.0, "max_abs": 0.0}
+        values = torch.tensor(list(residuals.values()), dtype=torch.float32)
+        return {
+            "mae": float(values.abs().mean().item()),
+            "rmse": float(torch.sqrt((values**2).mean()).item()),
+            "max_abs": float(values.abs().max().item()),
+        }
+
     def _emit_event(self, payload: dict[str, Any], *, verbose: bool) -> None:
         message = json.dumps(payload, sort_keys=True)
         LOGGER.info(message)
@@ -176,6 +188,7 @@ class MarketCalibrator:
             objective_decomposition={},
             predictions=self._instrument_snapshot()[1],
             targets=self._instrument_snapshot()[2],
+            residual_summary=self._residual_summary(self._instrument_snapshot()[0]),
         )
 
     def calibrate(self, num_epochs: int = 100, *, verbose: bool = True) -> MarketCalibrationResult:
@@ -230,6 +243,7 @@ class MarketCalibrator:
             },
             predictions=predictions,
             targets=targets,
+            residual_summary=self._residual_summary(residuals),
         )
         self._emit_event(
             {

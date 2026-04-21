@@ -34,6 +34,27 @@ class HullWhiteModel(StochasticModel):
             return torch.exp(-self.params["r0"] * maturity_tensor)
         return _linear_interpolate(maturity_tensor, self.curve_maturities, self.curve_discount_factors)
 
+    def instantaneous_forward_rate(self, maturity):
+        maturity_tensor = self.tensor(maturity)
+        bump = torch.tensor(1e-4, device=self.device, dtype=maturity_tensor.dtype)
+        t_up = maturity_tensor + bump
+        t_down = torch.clamp(maturity_tensor - bump, min=0.0)
+        log_discount_up = -torch.log(torch.clamp(self.initial_discount_factor(t_up), min=1e-12))
+        log_discount_down = -torch.log(torch.clamp(self.initial_discount_factor(t_down), min=1e-12))
+        denominator = torch.clamp(t_up - t_down, min=1e-12)
+        return (log_discount_up - log_discount_down) / denominator
+
+    def theta(self, maturity):
+        maturity_tensor = self.tensor(maturity)
+        a = torch.clamp(self.params["a"], min=1e-12)
+        sigma = torch.clamp(self.params["sigma"], min=0.0)
+        bump = torch.tensor(1e-4, device=self.device, dtype=maturity_tensor.dtype)
+        fwd_up = self.instantaneous_forward_rate(maturity_tensor + bump)
+        fwd_down = self.instantaneous_forward_rate(torch.clamp(maturity_tensor - bump, min=0.0))
+        dfdt = (fwd_up - fwd_down) / torch.clamp(2.0 * bump, min=1e-12)
+        forward = self.instantaneous_forward_rate(maturity_tensor)
+        return dfdt + a * forward + (sigma**2 / (2.0 * a)) * (1.0 - torch.exp(-2.0 * a * maturity_tensor))
+
     def zero_coupon_bond_price(self, maturity, r_t=None):
         maturity_tensor = self.tensor(maturity)
         if maturity_tensor.item() <= 0:

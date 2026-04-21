@@ -30,6 +30,7 @@ class YieldCurveMultiStartResult:
     best: YieldCurveCalibrationResult
     runs: tuple[YieldCurveCalibrationResult, ...]
     final_losses: tuple[float, ...]
+    summary: dict[str, float] = field(default_factory=dict)
 
 
 def _point_name(point: YieldCurvePoint) -> str:
@@ -101,10 +102,18 @@ def calibrate_yield_curve_multistart(
             )
         )
     best = min(runs, key=lambda run: run.result.final_loss)
+    final_losses = tuple(run.result.final_loss for run in runs)
+    loss_tensor = torch.tensor(final_losses, dtype=torch.float32)
     return YieldCurveMultiStartResult(
         best=best,
         runs=tuple(runs),
-        final_losses=tuple(run.result.final_loss for run in runs),
+        final_losses=final_losses,
+        summary={
+            "mean_loss": float(loss_tensor.mean().item()),
+            "std_loss": float(loss_tensor.std(unbiased=False).item()),
+            "best_loss": float(loss_tensor.min().item()),
+            "worst_loss": float(loss_tensor.max().item()),
+        },
     )
 
 

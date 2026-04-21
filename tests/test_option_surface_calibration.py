@@ -73,3 +73,5 @@ def test_option_surface_multistart_returns_best_run():
     result = calibrate_option_surface_multistart(model_factory, quotes, starts=2, num_epochs=100, lr=0.05, verbose=False)
     assert len(result.runs) == 2
     assert result.best.result.final_loss == min(result.final_losses)
+    assert "mean_loss" in result.summary
+    assert "std_loss" in result.summary

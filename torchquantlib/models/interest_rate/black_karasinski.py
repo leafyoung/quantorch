@@ -34,6 +34,16 @@ class BlackKarasinski(StochasticModel):
             return torch.exp(-torch.clamp(self.params["r0"], min=1e-8) * maturity_tensor)
         return _linear_interpolate(maturity_tensor, self.curve_maturities, self.curve_discount_factors)
 
+    def instantaneous_forward_rate(self, maturity):
+        maturity_tensor = self.tensor(maturity)
+        bump = torch.tensor(1e-4, device=self.device, dtype=maturity_tensor.dtype)
+        t_up = maturity_tensor + bump
+        t_down = torch.clamp(maturity_tensor - bump, min=0.0)
+        log_discount_up = -torch.log(torch.clamp(self.initial_discount_factor(t_up), min=1e-12))
+        log_discount_down = -torch.log(torch.clamp(self.initial_discount_factor(t_down), min=1e-12))
+        denominator = torch.clamp(t_up - t_down, min=1e-12)
+        return (log_discount_up - log_discount_down) / denominator
+
     def zero_coupon_bond_price(self, maturity, r_t=None, integration_steps: int = 256):
         maturity_tensor = self.tensor(maturity)
         if maturity_tensor.item() <= 0:

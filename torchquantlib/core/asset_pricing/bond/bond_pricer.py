@@ -269,6 +269,37 @@ def putable_convertible_bond_lattice(
     )
 
 
+def callable_putable_convertible_bond_lattice(
+    face_value: Tensor,
+    coupon_rate: Tensor,
+    rate: Tensor,
+    periods: Tensor,
+    conversion_ratio: Tensor,
+    stock_price: Tensor,
+    stock_volatility: Tensor,
+    call_price: Tensor,
+    call_period: Tensor,
+    put_price: Tensor,
+    put_period: Tensor,
+    *,
+    dividend_yield: Tensor | None = None,
+) -> Tensor:
+    return convertible_bond_lattice(
+        face_value,
+        coupon_rate,
+        rate,
+        periods,
+        conversion_ratio,
+        stock_price,
+        stock_volatility,
+        dividend_yield=dividend_yield,
+        call_price=call_price,
+        call_period=call_period,
+        put_price=put_price,
+        put_period=put_period,
+    )
+
+
 def stochastic_rate_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: Tensor) -> Tensor:
     coupon = face_value * coupon_rate
     period_count = max(1, int(periods.item()))
@@ -285,6 +316,7 @@ __all__ = [
     "convertible_bond",
     "convertible_bond_lattice",
     "putable_convertible_bond_lattice",
+    "callable_putable_convertible_bond_lattice",
     "coupon_bond",
     "putable_bond",
     "putable_bond_lattice",

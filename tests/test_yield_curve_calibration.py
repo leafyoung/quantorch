@@ -78,6 +78,9 @@ def test_initial_discount_curve_fit_for_hull_white_and_black_karasinski():
 
     assert torch.isclose(hw_model.zero_coupon_bond_price(2.0), discount_factors[1], atol=1e-6)
     assert torch.isclose(bk_model.zero_coupon_bond_price(2.0), discount_factors[1], atol=1e-6)
+    assert torch.isclose(hw_model.instantaneous_forward_rate(2.0), torch.tensor(0.03), atol=5e-3)
+    assert torch.isclose(bk_model.instantaneous_forward_rate(2.0), torch.tensor(0.03), atol=5e-3)
+    assert torch.isfinite(hw_model.theta(2.0))
 
 
 def test_yield_curve_multistart_returns_best_run():
@@ -96,3 +99,5 @@ def test_yield_curve_multistart_returns_best_run():
     result = calibrate_yield_curve_multistart(model_factory, points, starts=2, num_epochs=100, lr=0.05, verbose=False)
     assert len(result.runs) == 2
     assert result.best.result.final_loss == min(result.final_losses)
+    assert "mean_loss" in result.summary
+    assert "std_loss" in result.summary

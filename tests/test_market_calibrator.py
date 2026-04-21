@@ -68,3 +68,6 @@ def test_market_calibrator_regularization_tracks_objective_decomposition():
     assert "data_loss" in result.objective_decomposition
     assert "regularization_loss" in result.objective_decomposition
     assert result.objective_decomposition["regularization_loss"] >= 0
+    assert "mae" in result.residual_summary
+    assert "rmse" in result.residual_summary
+    assert "max_abs" in result.residual_summary
