@@ -123,3 +123,12 @@ def test_shifted_lognormal_sabr_handles_low_forward_levels():
 def test_invalid_sabr_model_name(sabr_model):
     with pytest.raises(ValueError):
         sabr_model.option_price(K=100, T=1, r=0.05, option_type='call', model='invalid')
+
+
+def test_sabr_smile_flattens_when_nu_is_near_zero():
+    model = SABR(alpha_init=0.2, beta_init=0.5, rho_init=-0.2, nu_init=1e-5, F0=100.0)
+    low_strike_vol = model.implied_volatility(K=90, T=1.0, r=0.01)
+    atm_vol = model.implied_volatility(K=100, T=1.0, r=0.01)
+    high_strike_vol = model.implied_volatility(K=110, T=1.0, r=0.01)
+    assert torch.isclose(low_strike_vol, atm_vol, atol=5e-3, rtol=1e-2)
+    assert torch.isclose(high_strike_vol, atm_vol, atol=5e-3, rtol=1e-2)

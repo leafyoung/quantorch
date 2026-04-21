@@ -4,7 +4,9 @@ from torchquantlib.core.asset_pricing.bond.bond_pricer import (
     zero_coupon_bond,
     coupon_bond,
     callable_bond,
+    callable_bond_lattice,
     putable_bond,
+    putable_bond_lattice,
     convertible_bond,
     stochastic_rate_bond
 )
@@ -111,3 +113,45 @@ def test_stochastic_rate_bond(setup_tensors):
     )
     assert price > 0
     assert price < setup_tensors['face_value'] * (1 + setup_tensors['coupon_rate'] * setup_tensors['periods'])
+
+
+def test_callable_bond_lattice_matches_zero_vol_wrapper(setup_tensors):
+    lattice_price = callable_bond_lattice(
+        setup_tensors['face_value'],
+        setup_tensors['coupon_rate'],
+        setup_tensors['rate'],
+        setup_tensors['periods'],
+        setup_tensors['call_price'],
+        setup_tensors['call_period'],
+        rate_volatility=torch.tensor(0.0),
+    )
+    wrapper_price = callable_bond(
+        setup_tensors['face_value'],
+        setup_tensors['coupon_rate'],
+        setup_tensors['rate'],
+        setup_tensors['periods'],
+        setup_tensors['call_price'],
+        setup_tensors['call_period'],
+    )
+    assert torch.isclose(lattice_price, wrapper_price, atol=1e-6)
+
+
+def test_putable_bond_lattice_matches_zero_vol_wrapper(setup_tensors):
+    lattice_price = putable_bond_lattice(
+        setup_tensors['face_value'],
+        setup_tensors['coupon_rate'],
+        setup_tensors['rate'],
+        setup_tensors['periods'],
+        setup_tensors['put_price'],
+        setup_tensors['put_period'],
+        rate_volatility=torch.tensor(0.0),
+    )
+    wrapper_price = putable_bond(
+        setup_tensors['face_value'],
+        setup_tensors['coupon_rate'],
+        setup_tensors['rate'],
+        setup_tensors['periods'],
+        setup_tensors['put_price'],
+        setup_tensors['put_period'],
+    )
+    assert torch.isclose(lattice_price, wrapper_price, atol=1e-6)

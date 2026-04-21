@@ -1,9 +1,11 @@
 from torchquantlib.core.asset_pricing.bond import (
     callable_bond,
+    callable_bond_lattice,
     convertible_bond,
     coupon_bond,
     fixed_income_forward,
     putable_bond,
+    putable_bond_lattice,
     stochastic_rate_bond,
     zero_coupon_bond,
 )
@@ -27,6 +29,7 @@ __all__ = [
     "bermudan_option",
     "black_scholes_merton",
     "callable_bond",
+    "callable_bond_lattice",
     "convertible_bond",
     "coupon_bond",
     "fixed_income_forward",
@@ -36,6 +39,7 @@ __all__ = [
     "normal_cdf",
     "normal_pdf",
     "putable_bond",
+    "putable_bond_lattice",
     "stochastic_rate_bond",
     "zero_coupon_bond",
 ]

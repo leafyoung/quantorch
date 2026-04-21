@@ -2,6 +2,7 @@ import math
 
 import pytest
 import torch
+from torchquantlib.core.asset_pricing.option.black_scholes_merton import black_scholes_merton
 from torchquantlib.models.stochastic_volatility.heston import Heston
 
 @pytest.fixture
@@ -144,3 +145,26 @@ def test_characteristic_function_and_monte_carlo_are_reasonably_close(heston_mod
         steps=200,
     )
     assert abs(cf_price - mc_price) < 2.0
+
+
+def test_heston_characteristic_function_reduces_toward_black_scholes_limit():
+    model = Heston(kappa_init=8.0, theta_init=0.04, sigma_v_init=1e-4, rho_init=0.0, v0_init=0.04, mu_init=0.0)
+    heston_price = model.option_price(
+        S0=100,
+        K=100,
+        T=1,
+        r=0.05,
+        option_type='call',
+        method='characteristic_function',
+    )
+    bsm_price = black_scholes_merton(
+        option_type='call',
+        option_style='european',
+        spot=torch.tensor(100.0),
+        strike=torch.tensor(100.0),
+        expiry=torch.tensor(1.0),
+        volatility=torch.tensor(0.2),
+        rate=torch.tensor(0.05),
+        dividend=torch.tensor(0.0),
+    )
+    assert abs(heston_price - float(bsm_price.item())) < 0.5

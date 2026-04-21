@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import Tensor
 
@@ -16,6 +18,57 @@ def _discount_factor(rate: Tensor, time_index: Tensor) -> Tensor:
     return torch.clamp((1 + rate) ** time_index, min=EPSILON)
 
 
+def _short_rate_tree(initial_rate: Tensor, periods: Tensor, rate_volatility: Tensor) -> list[Tensor]:
+    count = max(1, int(periods.item()))
+    dtype = initial_rate.dtype
+    device = initial_rate.device
+    sigma = torch.clamp(rate_volatility.to(device=device, dtype=dtype), min=0.0)
+    if sigma.item() == 0:
+        return [torch.full((n + 1,), initial_rate.item(), device=device, dtype=dtype) for n in range(count)]
+
+    up = torch.exp(sigma)
+    tree: list[Tensor] = []
+    for n in range(count):
+        exponents = torch.arange(-n, n + 1, 2, device=device, dtype=dtype)
+        tree.append(torch.clamp(initial_rate * (up**exponents), min=0.0))
+    return tree
+
+
+def _embedded_option_bond_lattice(
+    face_value: Tensor,
+    coupon_rate: Tensor,
+    rate: Tensor,
+    periods: Tensor,
+    *,
+    exercise_price: Tensor | None = None,
+    exercise_period: Tensor | None = None,
+    exercise_kind: str | None = None,
+    rate_volatility: Tensor | None = None,
+) -> Tensor:
+    period_count = max(1, int(periods.item()))
+    dtype = face_value.dtype
+    device = face_value.device
+    initial_rate = rate.to(device=device, dtype=dtype)
+    sigma_r = torch.zeros((), device=device, dtype=dtype) if rate_volatility is None else rate_volatility.to(device=device, dtype=dtype)
+    rate_tree = _short_rate_tree(initial_rate, periods.to(device=device), sigma_r)
+    coupon = face_value * coupon_rate.to(device=device, dtype=dtype)
+    continuation = torch.full((period_count + 1,), face_value.item(), device=device, dtype=dtype)
+
+    exercise_index = None if exercise_period is None else max(1, min(int(exercise_period.item()), period_count))
+    exercise_value = None if exercise_price is None else exercise_price.to(device=device, dtype=dtype)
+
+    for step in range(period_count - 1, -1, -1):
+        expected_next = 0.5 * (continuation[:-1] + continuation[1:])
+        node_values = (coupon + expected_next) / torch.clamp(1.0 + rate_tree[step], min=EPSILON)
+        if exercise_index is not None and exercise_value is not None and step + 1 == exercise_index:
+            if exercise_kind == "call":
+                node_values = torch.minimum(node_values, exercise_value)
+            elif exercise_kind == "put":
+                node_values = torch.maximum(node_values, exercise_value)
+        continuation = node_values
+    return continuation[0]
+
+
 def zero_coupon_bond(face_value: Tensor, rate: Tensor, maturity: Tensor) -> Tensor:
     return face_value / _discount_factor(rate, maturity)
 
@@ -29,28 +82,56 @@ def coupon_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: 
     return discounted_coupons.sum() + discounted_principal
 
 
+def callable_bond_lattice(
+    face_value: Tensor,
+    coupon_rate: Tensor,
+    rate: Tensor,
+    periods: Tensor,
+    call_price: Tensor,
+    call_period: Tensor,
+    rate_volatility: Tensor | None = None,
+) -> Tensor:
+    lattice_value = _embedded_option_bond_lattice(
+        face_value,
+        coupon_rate,
+        rate,
+        periods,
+        exercise_price=call_price,
+        exercise_period=call_period,
+        exercise_kind="call",
+        rate_volatility=rate_volatility,
+    )
+    return torch.minimum(lattice_value, coupon_bond(face_value, coupon_rate, rate, periods))
+
+
 def callable_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: Tensor, call_price: Tensor, call_period: Tensor) -> Tensor:
-    straight_value = coupon_bond(face_value, coupon_rate, rate, periods)
-    call_period_int = max(1, min(int(call_period.item()), int(periods.item())))
-    early_periods = torch.arange(1, call_period_int, device=face_value.device, dtype=face_value.dtype)
-    coupon_cashflow = face_value * coupon_rate
-    early_coupon_value = torch.zeros((), device=face_value.device, dtype=face_value.dtype)
-    if len(early_periods) > 0:
-        early_coupon_value = (coupon_cashflow / _discount_factor(rate, early_periods)).sum()
-    exercise_value = early_coupon_value + (coupon_cashflow + call_price) / _discount_factor(rate, torch.tensor(float(call_period_int), device=face_value.device, dtype=face_value.dtype))
-    return torch.minimum(straight_value, exercise_value)
+    return callable_bond_lattice(face_value, coupon_rate, rate, periods, call_price, call_period)
+
+
+def putable_bond_lattice(
+    face_value: Tensor,
+    coupon_rate: Tensor,
+    rate: Tensor,
+    periods: Tensor,
+    put_price: Tensor,
+    put_period: Tensor,
+    rate_volatility: Tensor | None = None,
+) -> Tensor:
+    lattice_value = _embedded_option_bond_lattice(
+        face_value,
+        coupon_rate,
+        rate,
+        periods,
+        exercise_price=put_price,
+        exercise_period=put_period,
+        exercise_kind="put",
+        rate_volatility=rate_volatility,
+    )
+    return torch.maximum(lattice_value, coupon_bond(face_value, coupon_rate, rate, periods))
 
 
 def putable_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: Tensor, put_price: Tensor, put_period: Tensor) -> Tensor:
-    straight_value = coupon_bond(face_value, coupon_rate, rate, periods)
-    put_period_int = max(1, min(int(put_period.item()), int(periods.item())))
-    early_periods = torch.arange(1, put_period_int, device=face_value.device, dtype=face_value.dtype)
-    coupon_cashflow = face_value * coupon_rate
-    early_coupon_value = torch.zeros((), device=face_value.device, dtype=face_value.dtype)
-    if len(early_periods) > 0:
-        early_coupon_value = (coupon_cashflow / _discount_factor(rate, early_periods)).sum()
-    exercise_value = early_coupon_value + (coupon_cashflow + put_price) / _discount_factor(rate, torch.tensor(float(put_period_int), device=face_value.device, dtype=face_value.dtype))
-    return torch.maximum(straight_value, exercise_value)
+    return putable_bond_lattice(face_value, coupon_rate, rate, periods, put_price, put_period)
 
 
 def convertible_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: Tensor, conversion_ratio: Tensor, conversion_price: Tensor) -> Tensor:
@@ -62,8 +143,19 @@ def convertible_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, peri
 def stochastic_rate_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: Tensor) -> Tensor:
     coupon = face_value * coupon_rate
     period_count = max(1, int(periods.item()))
-    period_indices = torch.arange(1, period_count + 1, device=rate.device, dtype=rate.dtype)
     discount_factors = torch.cumprod(1 + rate[:period_count], dim=0)
     discounted_coupons = coupon / discount_factors
     principal = face_value / discount_factors[-1]
     return discounted_coupons.sum() + principal
+
+
+__all__ = [
+    "callable_bond",
+    "callable_bond_lattice",
+    "convertible_bond",
+    "coupon_bond",
+    "putable_bond",
+    "putable_bond_lattice",
+    "stochastic_rate_bond",
+    "zero_coupon_bond",
+]
