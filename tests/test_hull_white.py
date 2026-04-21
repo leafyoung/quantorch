@@ -88,3 +88,16 @@ def test_parameter_sensitivity():
     result1 = hw_model1.simulate(S0, T, N, steps)
     result2 = hw_model2.simulate(S0, T, N, steps)
     assert torch.std(result2) > torch.std(result1)  # Higher volatility should lead to more dispersion
+
+
+def test_zero_coupon_bond_price_is_positive_and_decreases_with_maturity(hw_model):
+    short_price = hw_model.zero_coupon_bond_price(1.0)
+    long_price = hw_model.zero_coupon_bond_price(5.0)
+    assert short_price > 0
+    assert long_price > 0
+    assert short_price > long_price
+
+
+def test_zero_coupon_yield_is_finite(hw_model):
+    ytm = hw_model.zero_coupon_yield(2.0)
+    assert torch.isfinite(ytm)

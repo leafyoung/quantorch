@@ -1,6 +1,7 @@
 from torchquantlib.core.asset_pricing.bond.bond_pricer import (
     callable_bond,
     callable_bond_lattice,
+    callable_convertible_bond_lattice,
     convertible_bond,
     convertible_bond_lattice,
     coupon_bond,
@@ -14,6 +15,7 @@ from torchquantlib.core.asset_pricing.bond.fixed_income_forward import fixed_inc
 __all__ = [
     "callable_bond",
     "callable_bond_lattice",
+    "callable_convertible_bond_lattice",
     "convertible_bond",
     "convertible_bond_lattice",
     "coupon_bond",

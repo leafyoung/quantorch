@@ -150,6 +150,8 @@ def convertible_bond_lattice(
     stock_volatility: Tensor,
     *,
     dividend_yield: Tensor | None = None,
+    call_price: Tensor | None = None,
+    call_period: Tensor | None = None,
 ) -> Tensor:
     period_count = max(1, int(periods.item()))
     dtype = face_value.dtype
@@ -162,12 +164,20 @@ def convertible_bond_lattice(
     dividend = torch.zeros((), device=device, dtype=dtype) if dividend_yield is None else dividend_yield.to(device=device, dtype=dtype)
 
     dt = torch.tensor(1.0, device=device, dtype=dtype)
+    exercise_index = None if call_period is None else max(1, min(int(call_period.item()), period_count))
+    call_value = None if call_price is None else call_price.to(device=device, dtype=dtype)
+
     if volatility.item() == 0:
         growth = torch.exp((rate_tensor - dividend) * dt)
         terminal_stock = stock0 * growth**period_count
-        continuation = torch.full((period_count + 1,), torch.maximum(face_value, conversion_ratio * terminal_stock).item(), device=device, dtype=dtype)
-        for _ in range(period_count - 1, -1, -1):
+        terminal_value = torch.maximum(face_value, conversion_ratio * terminal_stock)
+        if call_value is not None and exercise_index == period_count:
+            terminal_value = torch.minimum(terminal_value, call_value)
+        continuation = torch.full((period_count + 1,), terminal_value.item(), device=device, dtype=dtype)
+        for step in range(period_count - 1, -1, -1):
             continuation = (coupon + continuation[:-1]) / torch.clamp(1.0 + rate_tensor, min=EPSILON)
+            if call_value is not None and exercise_index is not None and step + 1 == exercise_index:
+                continuation = torch.minimum(continuation, call_value)
         return continuation[0]
 
     up = torch.exp(volatility * torch.sqrt(dt))
@@ -177,15 +187,47 @@ def convertible_bond_lattice(
 
     terminal_stock = stock0 * (up ** torch.arange(period_count, -1, -1, device=device, dtype=dtype)) * (down ** torch.arange(0, period_count + 1, device=device, dtype=dtype))
     continuation = torch.maximum(face_value * torch.ones_like(terminal_stock), conversion_ratio * terminal_stock)
+    if call_value is not None and exercise_index == period_count:
+        continuation = torch.minimum(continuation, call_value)
 
     for step in range(period_count - 1, -1, -1):
         stock_nodes = stock0 * (up ** torch.arange(step, -1, -1, device=device, dtype=dtype)) * (down ** torch.arange(0, step + 1, device=device, dtype=dtype))
         expected_next = probability * continuation[:-1] + (1.0 - probability) * continuation[1:]
         hold_value = (coupon + expected_next) / torch.clamp(1.0 + rate_tensor, min=EPSILON)
         conversion_value = conversion_ratio * stock_nodes
-        continuation = torch.maximum(hold_value, conversion_value)
+        node_value = torch.maximum(hold_value, conversion_value)
+        if call_value is not None and exercise_index is not None and step + 1 == exercise_index:
+            node_value = torch.minimum(node_value, call_value)
+        continuation = node_value
 
     return continuation[0]
+
+
+def callable_convertible_bond_lattice(
+    face_value: Tensor,
+    coupon_rate: Tensor,
+    rate: Tensor,
+    periods: Tensor,
+    conversion_ratio: Tensor,
+    stock_price: Tensor,
+    stock_volatility: Tensor,
+    call_price: Tensor,
+    call_period: Tensor,
+    *,
+    dividend_yield: Tensor | None = None,
+) -> Tensor:
+    return convertible_bond_lattice(
+        face_value,
+        coupon_rate,
+        rate,
+        periods,
+        conversion_ratio,
+        stock_price,
+        stock_volatility,
+        dividend_yield=dividend_yield,
+        call_price=call_price,
+        call_period=call_period,
+    )
 
 
 def stochastic_rate_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: Tensor) -> Tensor:
@@ -200,6 +242,7 @@ def stochastic_rate_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, 
 __all__ = [
     "callable_bond",
     "callable_bond_lattice",
+    "callable_convertible_bond_lattice",
     "convertible_bond",
     "convertible_bond_lattice",
     "coupon_bond",

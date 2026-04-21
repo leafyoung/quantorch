@@ -45,6 +45,8 @@ def test_market_calibrator_returns_residual_snapshot():
     result = calibrator.calibrate(num_epochs=50, verbose=False)
 
     assert "k1" in result.residuals
+    assert "k1" in result.predictions
+    assert "k1" in result.targets
     assert isinstance(result.residuals["k1"], float)
     assert result.num_epochs == 50
 

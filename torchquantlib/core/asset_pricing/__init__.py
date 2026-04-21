@@ -1,6 +1,7 @@
 from torchquantlib.core.asset_pricing.bond import (
     callable_bond,
     callable_bond_lattice,
+    callable_convertible_bond_lattice,
     convertible_bond,
     convertible_bond_lattice,
     coupon_bond,
@@ -31,6 +32,7 @@ __all__ = [
     "black_scholes_merton",
     "callable_bond",
     "callable_bond_lattice",
+    "callable_convertible_bond_lattice",
     "convertible_bond",
     "convertible_bond_lattice",
     "coupon_bond",

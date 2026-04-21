@@ -80,3 +80,16 @@ def test_gradient_flow():
     assert bk_model.params['a'].grad is not None
     assert bk_model.params['sigma'].grad is not None
     assert bk_model.params['r0'].grad is not None
+
+
+def test_zero_coupon_bond_price_is_positive_and_decreases_with_maturity(bk_model):
+    short_price = bk_model.zero_coupon_bond_price(1.0)
+    long_price = bk_model.zero_coupon_bond_price(5.0)
+    assert short_price > 0
+    assert long_price > 0
+    assert short_price > long_price
+
+
+def test_zero_coupon_yield_is_finite(bk_model):
+    ytm = bk_model.zero_coupon_yield(2.0)
+    assert torch.isfinite(ytm)

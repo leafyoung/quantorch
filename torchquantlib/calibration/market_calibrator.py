@@ -55,6 +55,8 @@ class MarketCalibrationResult:
     duration_ms: float
     num_epochs: int
     objective_decomposition: dict[str, float] = field(default_factory=dict)
+    predictions: dict[str, float] = field(default_factory=dict)
+    targets: dict[str, float] = field(default_factory=dict)
 
 
 class MarketCalibrator:
@@ -133,14 +135,18 @@ class MarketCalibrator:
             return torch.zeros((), device=self.model.device, dtype=torch.float32)
         return self.config.regularization_strength * torch.stack([penalty.mean() for penalty in penalties]).sum()
 
-    def _residual_snapshot(self) -> dict[str, float]:
+    def _instrument_snapshot(self) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
         residuals: dict[str, float] = {}
+        predictions: dict[str, float] = {}
+        targets: dict[str, float] = {}
         with torch.no_grad():
             for instrument in self.instruments:
                 target = self._tensor(instrument.target)
                 prediction = self._instrument_prediction(instrument)
                 residuals[instrument.name] = float((prediction - target).item())
-        return residuals
+                predictions[instrument.name] = float(prediction.item())
+                targets[instrument.name] = float(target.item())
+        return residuals, predictions, targets
 
     def _emit_event(self, payload: dict[str, Any], *, verbose: bool) -> None:
         message = json.dumps(payload, sort_keys=True)
@@ -164,10 +170,12 @@ class MarketCalibrator:
             final_loss=self.loss_history[-1] if self.loss_history else float("nan"),
             loss_history=tuple(self.loss_history),
             params=self.get_calibrated_params(),
-            residuals=self._residual_snapshot(),
+            residuals=self._instrument_snapshot()[0],
             duration_ms=0.0,
             num_epochs=0,
             objective_decomposition={},
+            predictions=self._instrument_snapshot()[1],
+            targets=self._instrument_snapshot()[2],
         )
 
     def calibrate(self, num_epochs: int = 100, *, verbose: bool = True) -> MarketCalibrationResult:
@@ -208,17 +216,20 @@ class MarketCalibrator:
             final_data_terms.append(self._objective_term(prediction, target, instrument).detach())
         final_data_loss = torch.stack(final_data_terms).mean().item()
         final_regularization_loss = float(self._regularization_term().detach().item())
+        residuals, predictions, targets = self._instrument_snapshot()
         self.last_result = MarketCalibrationResult(
             final_loss=self.loss_history[-1],
             loss_history=tuple(self.loss_history),
             params=self.get_calibrated_params(),
-            residuals=self._residual_snapshot(),
+            residuals=residuals,
             duration_ms=duration_ms,
             num_epochs=int(num_epochs),
             objective_decomposition={
                 "data_loss": float(final_data_loss),
                 "regularization_loss": final_regularization_loss,
             },
+            predictions=predictions,
+            targets=targets,
         )
         self._emit_event(
             {
