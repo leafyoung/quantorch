@@ -17,6 +17,7 @@ from torchquantlib.calibration import (
     calibrate_option_surface_multistart,
     calibrate_yield_curve,
     calibrate_yield_curve_multistart,
+    fit_initial_curve_from_points,
 )
 from torchquantlib.core import (
     AsianOption,
@@ -106,6 +107,7 @@ __all__ = [
     "build_option_surface_instruments",
     "build_yield_curve_instruments",
     "calibrate_option_surface_multistart",
+    "fit_initial_curve_from_points",
     "callable_bond",
     "callable_bond_lattice",
     "callable_convertible_bond_lattice",

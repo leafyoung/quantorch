@@ -1,0 +1,45 @@
+---
+title: Further Production Work
+format: gfm
+---
+
+# Further production-grade quant work
+
+This note tracks the remaining items after the current desk-level quant modeling pass.
+
+## Calibration and model risk
+
+- Add restart-level convergence diagnostics such as:
+  - gradient norms
+  - optimizer termination reasons
+  - loss trajectories summary across starts
+  - parameter clustering across restarts
+- Add instrument-group diagnostics by tenor, strike bucket, and quote type.
+- Add robust constrained calibration with explicit parameter bounds and restart seeding policies.
+- Add out-of-sample calibration validation reports.
+
+## Hull-White / Black-Karasinski
+
+- Implement more complete Hull-White theta(t) reconstruction tied to an explicit market zero curve object.
+- Add curve-consistent analytical bond option pricing where applicable.
+- Add stronger Black-Karasinski calibration to richer instrument sets beyond simple zero-coupon points.
+- Support explicit term-structure containers and interpolation policy configuration.
+
+## Volatility models
+
+- Add broader literature benchmark grids for Heston and SABR.
+- Add production-style calibration reports for smiles and surfaces.
+- Add parameter stability and identifiability checks across multi-start runs.
+
+## Hybrid bonds
+
+- Add schedule containers for richer exercise schedules with issuer/investor priority rules.
+- Support coupon schedules that vary over time.
+- Add credit-sensitive hybrid convertible models with spread or hazard-rate inputs.
+- Add path-dependent conversion and soft-call style features.
+
+## General engineering
+
+- Add standardized result-report objects across calibration modules.
+- Add richer documentation/examples for production-style workflows.
+- Add persistent benchmark snapshots for numerical regression testing.

@@ -5,6 +5,7 @@ from torchquantlib.calibration import (
     build_yield_curve_instruments,
     calibrate_yield_curve,
     calibrate_yield_curve_multistart,
+    fit_initial_curve_from_points,
 )
 from torchquantlib.models.interest_rate.black_karasinski import BlackKarasinski
 from torchquantlib.models.interest_rate.hull_white import HullWhiteModel
@@ -101,3 +102,37 @@ def test_yield_curve_multistart_returns_best_run():
     assert result.best.result.final_loss == min(result.final_losses)
     assert "mean_loss" in result.summary
     assert "std_loss" in result.summary
+    assert "r0" in result.parameter_dispersion
+
+
+def test_fit_initial_curve_from_yield_points_supports_arbitrary_market_curve():
+    points = [
+        YieldCurvePoint(maturity=1.0, target=0.02, target_type="yield"),
+        YieldCurvePoint(maturity=3.0, target=0.025, target_type="yield"),
+        YieldCurvePoint(maturity=5.0, target=0.03, target_type="yield"),
+    ]
+    model = fit_initial_curve_from_points(HullWhiteModel(), points)
+    assert torch.isfinite(model.initial_discount_factor(2.0))
+    assert model.initial_discount_factor(1.0) > model.initial_discount_factor(5.0)
+
+
+def test_calibrate_yield_curve_recovers_black_karasinski_r0_from_synthetic_prices():
+    true_model = BlackKarasinski(a_init=0.2, sigma_init=0.01, r0_init=0.03)
+    fit_model = BlackKarasinski(a_init=0.2, sigma_init=0.01, r0_init=0.01)
+    fit_model.params["a"].requires_grad_(False)
+    fit_model.params["sigma"].requires_grad_(False)
+
+    maturities = [1.0, 2.0, 4.0]
+    points = [
+        YieldCurvePoint(
+            maturity=maturity,
+            target=float(true_model.zero_coupon_bond_price(maturity).item()),
+            target_type="price",
+            name=f"bk_{maturity}",
+        )
+        for maturity in maturities
+    ]
+
+    calibration = calibrate_yield_curve(fit_model, points, num_epochs=200, lr=0.05, verbose=False)
+    assert calibration.result.final_loss < 1e-6
+    assert abs(fit_model.params["r0"].item() - 0.03) < 0.01

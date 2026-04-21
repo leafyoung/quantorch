@@ -42,6 +42,7 @@ class OptionSurfaceMultiStartResult:
     runs: tuple[OptionSurfaceCalibrationResult, ...]
     final_losses: tuple[float, ...]
     summary: dict[str, float] = field(default_factory=dict)
+    parameter_dispersion: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 def _quote_name(quote: OptionSurfaceQuote) -> str:
@@ -176,6 +177,21 @@ def calibrate_option_surface_multistart(
     best = min(runs, key=lambda run: run.result.final_loss)
     final_losses = tuple(run.result.final_loss for run in runs)
     loss_tensor = torch.tensor(final_losses, dtype=torch.float32)
+
+    parameter_dispersion: dict[str, dict[str, float]] = {}
+    param_names = best.result.params.keys()
+    for name in param_names:
+        values = [run.result.params[name] for run in runs if isinstance(run.result.params[name], float)]
+        if not values:
+            continue
+        tensor_values = torch.tensor(values, dtype=torch.float32)
+        parameter_dispersion[name] = {
+            "mean": float(tensor_values.mean().item()),
+            "std": float(tensor_values.std(unbiased=False).item()),
+            "min": float(tensor_values.min().item()),
+            "max": float(tensor_values.max().item()),
+        }
+
     return OptionSurfaceMultiStartResult(
         best=best,
         runs=tuple(runs),
@@ -186,6 +202,7 @@ def calibrate_option_surface_multistart(
             "best_loss": float(loss_tensor.min().item()),
             "worst_loss": float(loss_tensor.max().item()),
         },
+        parameter_dispersion=parameter_dispersion,
     )
 
 

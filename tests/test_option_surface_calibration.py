@@ -75,3 +75,5 @@ def test_option_surface_multistart_returns_best_run():
     assert result.best.result.final_loss == min(result.final_losses)
     assert "mean_loss" in result.summary
     assert "std_loss" in result.summary
+    assert "alpha" in result.parameter_dispersion
+    assert "mean" in result.parameter_dispersion["alpha"]

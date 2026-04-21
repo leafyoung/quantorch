@@ -20,6 +20,7 @@ from torchquantlib.calibration.yield_curve_calibration import (
     build_yield_curve_instruments,
     calibrate_yield_curve,
     calibrate_yield_curve_multistart,
+    fit_initial_curve_from_points,
 )
 
 __all__ = [
@@ -41,4 +42,5 @@ __all__ = [
     "YieldCurveCalibrationResult",
     "YieldCurveMultiStartResult",
     "YieldCurvePoint",
+    "fit_initial_curve_from_points",
 ]

@@ -140,6 +140,25 @@ def convertible_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, peri
     return torch.maximum(straight_value, conversion_value)
 
 
+def _normalize_exercise_schedule(
+    periods: Tensor,
+    schedule: dict[int, Tensor | float] | None,
+    single_price: Tensor | None,
+    single_period: Tensor | None,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> dict[int, Tensor]:
+    max_period = max(1, int(periods.item()))
+    normalized: dict[int, Tensor] = {}
+    if schedule is not None:
+        for period_index, price in schedule.items():
+            normalized[max(1, min(int(period_index), max_period))] = torch.as_tensor(price, device=device, dtype=dtype)
+    if single_price is not None and single_period is not None:
+        normalized[max(1, min(int(single_period.item()), max_period))] = single_price.to(device=device, dtype=dtype)
+    return normalized
+
+
 def convertible_bond_lattice(
     face_value: Tensor,
     coupon_rate: Tensor,
@@ -154,6 +173,8 @@ def convertible_bond_lattice(
     call_period: Tensor | None = None,
     put_price: Tensor | None = None,
     put_period: Tensor | None = None,
+    call_schedule: dict[int, Tensor | float] | None = None,
+    put_schedule: dict[int, Tensor | float] | None = None,
 ) -> Tensor:
     period_count = max(1, int(periods.item()))
     dtype = face_value.dtype
@@ -166,26 +187,25 @@ def convertible_bond_lattice(
     dividend = torch.zeros((), device=device, dtype=dtype) if dividend_yield is None else dividend_yield.to(device=device, dtype=dtype)
 
     dt = torch.tensor(1.0, device=device, dtype=dtype)
-    call_index = None if call_period is None else max(1, min(int(call_period.item()), period_count))
-    call_value = None if call_price is None else call_price.to(device=device, dtype=dtype)
-    put_index = None if put_period is None else max(1, min(int(put_period.item()), period_count))
-    put_value = None if put_price is None else put_price.to(device=device, dtype=dtype)
+    call_schedule_map = _normalize_exercise_schedule(periods, call_schedule, call_price, call_period, device=device, dtype=dtype)
+    put_schedule_map = _normalize_exercise_schedule(periods, put_schedule, put_price, put_period, device=device, dtype=dtype)
 
     if volatility.item() == 0:
         growth = torch.exp((rate_tensor - dividend) * dt)
         terminal_stock = stock0 * growth**period_count
         terminal_value = torch.maximum(face_value, conversion_ratio * terminal_stock)
-        if call_value is not None and call_index == period_count:
-            terminal_value = torch.minimum(terminal_value, call_value)
-        if put_value is not None and put_index == period_count:
-            terminal_value = torch.maximum(terminal_value, put_value)
+        if period_count in call_schedule_map:
+            terminal_value = torch.minimum(terminal_value, call_schedule_map[period_count])
+        if period_count in put_schedule_map:
+            terminal_value = torch.maximum(terminal_value, put_schedule_map[period_count])
         continuation = torch.full((period_count + 1,), terminal_value.item(), device=device, dtype=dtype)
         for step in range(period_count - 1, -1, -1):
             continuation = (coupon + continuation[:-1]) / torch.clamp(1.0 + rate_tensor, min=EPSILON)
-            if call_value is not None and call_index is not None and step + 1 == call_index:
-                continuation = torch.minimum(continuation, call_value)
-            if put_value is not None and put_index is not None and step + 1 == put_index:
-                continuation = torch.maximum(continuation, put_value)
+            exercise_date = step + 1
+            if exercise_date in call_schedule_map:
+                continuation = torch.minimum(continuation, call_schedule_map[exercise_date])
+            if exercise_date in put_schedule_map:
+                continuation = torch.maximum(continuation, put_schedule_map[exercise_date])
         return continuation[0]
 
     up = torch.exp(volatility * torch.sqrt(dt))
@@ -195,10 +215,10 @@ def convertible_bond_lattice(
 
     terminal_stock = stock0 * (up ** torch.arange(period_count, -1, -1, device=device, dtype=dtype)) * (down ** torch.arange(0, period_count + 1, device=device, dtype=dtype))
     continuation = torch.maximum(face_value * torch.ones_like(terminal_stock), conversion_ratio * terminal_stock)
-    if call_value is not None and call_index == period_count:
-        continuation = torch.minimum(continuation, call_value)
-    if put_value is not None and put_index == period_count:
-        continuation = torch.maximum(continuation, put_value)
+    if period_count in call_schedule_map:
+        continuation = torch.minimum(continuation, call_schedule_map[period_count])
+    if period_count in put_schedule_map:
+        continuation = torch.maximum(continuation, put_schedule_map[period_count])
 
     for step in range(period_count - 1, -1, -1):
         stock_nodes = stock0 * (up ** torch.arange(step, -1, -1, device=device, dtype=dtype)) * (down ** torch.arange(0, step + 1, device=device, dtype=dtype))
@@ -206,10 +226,11 @@ def convertible_bond_lattice(
         hold_value = (coupon + expected_next) / torch.clamp(1.0 + rate_tensor, min=EPSILON)
         conversion_value = conversion_ratio * stock_nodes
         node_value = torch.maximum(hold_value, conversion_value)
-        if call_value is not None and call_index is not None and step + 1 == call_index:
-            node_value = torch.minimum(node_value, call_value)
-        if put_value is not None and put_index is not None and step + 1 == put_index:
-            node_value = torch.maximum(node_value, put_value)
+        exercise_date = step + 1
+        if exercise_date in call_schedule_map:
+            node_value = torch.minimum(node_value, call_schedule_map[exercise_date])
+        if exercise_date in put_schedule_map:
+            node_value = torch.maximum(node_value, put_schedule_map[exercise_date])
         continuation = node_value
 
     return continuation[0]
@@ -227,6 +248,7 @@ def callable_convertible_bond_lattice(
     call_period: Tensor,
     *,
     dividend_yield: Tensor | None = None,
+    call_schedule: dict[int, Tensor | float] | None = None,
 ) -> Tensor:
     return convertible_bond_lattice(
         face_value,
@@ -239,6 +261,7 @@ def callable_convertible_bond_lattice(
         dividend_yield=dividend_yield,
         call_price=call_price,
         call_period=call_period,
+        call_schedule=call_schedule,
     )
 
 
@@ -254,6 +277,7 @@ def putable_convertible_bond_lattice(
     put_period: Tensor,
     *,
     dividend_yield: Tensor | None = None,
+    put_schedule: dict[int, Tensor | float] | None = None,
 ) -> Tensor:
     return convertible_bond_lattice(
         face_value,
@@ -266,6 +290,7 @@ def putable_convertible_bond_lattice(
         dividend_yield=dividend_yield,
         put_price=put_price,
         put_period=put_period,
+        put_schedule=put_schedule,
     )
 
 
@@ -283,6 +308,8 @@ def callable_putable_convertible_bond_lattice(
     put_period: Tensor,
     *,
     dividend_yield: Tensor | None = None,
+    call_schedule: dict[int, Tensor | float] | None = None,
+    put_schedule: dict[int, Tensor | float] | None = None,
 ) -> Tensor:
     return convertible_bond_lattice(
         face_value,
@@ -297,6 +324,8 @@ def callable_putable_convertible_bond_lattice(
         call_period=call_period,
         put_price=put_price,
         put_period=put_period,
+        call_schedule=call_schedule,
+        put_schedule=put_schedule,
     )
 
 
