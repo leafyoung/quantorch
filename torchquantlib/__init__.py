@@ -1,4 +1,11 @@
-from torchquantlib.calibration import CalibrationConfig, ModelCalibrator
+from torchquantlib.calibration import (
+    CalibrationConfig,
+    CalibrationInstrument,
+    MarketCalibrationConfig,
+    MarketCalibrationResult,
+    MarketCalibrator,
+    ModelCalibrator,
+)
 from torchquantlib.core import (
     AsianOption,
     Greeks,
@@ -50,12 +57,16 @@ __all__ = [
     "BlackKarasinski",
     "CIR",
     "CalibrationConfig",
+    "CalibrationInstrument",
     "DupireLocalVol",
     "Greeks",
     "Heston",
     "HullWhiteModel",
     "LMM",
     "MalliavinGreeks",
+    "MarketCalibrationConfig",
+    "MarketCalibrationResult",
+    "MarketCalibrator",
     "ModelCalibrator",
     "SABR",
     "Seq2SeqPDESolver",

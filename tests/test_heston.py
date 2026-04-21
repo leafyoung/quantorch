@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 from torchquantlib.models.stochastic_volatility.heston import Heston
@@ -92,7 +94,7 @@ def test_option_price_put_call_parity(heston_model):
     S0, K, T, r = 100, 100, 1, 0.05
     call_price = heston_model.option_price(S0, K, T, r, option_type='call', N=10000, steps=100)
     put_price = heston_model.option_price(S0, K, T, r, option_type='put', N=10000, steps=100)
-    parity = call_price - put_price - (S0 - K * torch.exp(-r * T).item())
+    parity = call_price - put_price - (S0 - K * math.exp(-r * T))
     assert abs(parity) < 1e-2  # Allow for some Monte Carlo error
 
 def test_zero_volatility(heston_model):
@@ -107,3 +109,38 @@ def test_high_mean_reversion(heston_model):
     S0, T, N, steps = 100, 1, 1000, 252
     result = heston_model.simulate(S0, T, N, steps)
     assert torch.all(result > 0)
+
+
+def test_characteristic_function_pricing(heston_model):
+    price = heston_model.option_price(
+        S0=100,
+        K=100,
+        T=1,
+        r=0.05,
+        option_type='call',
+        method='characteristic_function',
+    )
+    assert isinstance(price, float)
+    assert price > 0
+
+
+def test_characteristic_function_and_monte_carlo_are_reasonably_close(heston_model):
+    cf_price = heston_model.option_price(
+        S0=100,
+        K=100,
+        T=1,
+        r=0.05,
+        option_type='call',
+        method='characteristic_function',
+    )
+    mc_price = heston_model.option_price(
+        S0=100,
+        K=100,
+        T=1,
+        r=0.05,
+        option_type='call',
+        method='monte_carlo',
+        N=20000,
+        steps=200,
+    )
+    assert abs(cf_price - mc_price) < 2.0

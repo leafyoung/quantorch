@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import torch
 from torch import Tensor
 
-from torchquantlib.core.asset_pricing.option.black_scholes_merton import black_scholes_merton
 from torchquantlib.core.asset_pricing.option.exotics import asian_option as monte_carlo_asian_option
 
 EPSILON = 1e-8
@@ -18,25 +18,59 @@ def _to_tensor(value, device: torch.device | None = None) -> Tensor:
     return tensor.to(device) if device is not None else tensor
 
 
-def _discounted_intrinsic_from_average(
-    option_type: str,
-    spot: Tensor,
-    strike: Tensor,
-    expiry: Tensor,
-    rate: Tensor,
-) -> Tensor:
-    if torch.abs(rate) < EPSILON:
-        expected_average = spot
-    else:
-        expected_average = spot * (torch.exp(rate * expiry) - 1.0) / (rate * expiry)
-
-    payoff = torch.relu(expected_average - strike) if option_type == "call" else torch.relu(strike - expected_average)
-    return payoff * torch.exp(-rate * expiry)
+def _normal_cdf(x: Tensor) -> Tensor:
+    return 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 
-def _effective_asian_volatility(volatility: Tensor, steps: int) -> Tensor:
-    discrete_adjustment = torch.sqrt(torch.tensor((2 * steps + 1) / (6 * (steps + 1)), device=volatility.device))
-    return torch.clamp(volatility * discrete_adjustment, min=EPSILON)
+def _sampling_times(expiry: Tensor, steps: int) -> Tensor:
+    return expiry * torch.arange(1, steps + 1, device=expiry.device, dtype=expiry.dtype) / steps
+
+
+def _average_forward_mean(spot: Tensor, expiry: Tensor, rate: Tensor, steps: int) -> Tensor:
+    times = _sampling_times(expiry, steps)
+    return spot * torch.exp(rate * times).mean()
+
+
+def _discounted_intrinsic(option_type: str, average_level: Tensor, strike: Tensor, expiry: Tensor, rate: Tensor) -> Tensor:
+    payoff = torch.relu(average_level - strike) if option_type == "call" else torch.relu(strike - average_level)
+    return torch.exp(-rate * expiry) * payoff
+
+
+def _lognormal_option_price(option_type: str, mean_level: Tensor, second_moment: Tensor, strike: Tensor, expiry: Tensor, rate: Tensor) -> Tensor:
+    mean_level = torch.clamp(mean_level, min=EPSILON)
+    second_moment = torch.clamp(second_moment, min=mean_level**2)
+    log_variance = torch.log(torch.clamp(second_moment / torch.clamp(mean_level**2, min=EPSILON), min=1.0))
+
+    if log_variance.item() <= EPSILON:
+        return _discounted_intrinsic(option_type, mean_level, strike, expiry, rate)
+
+    sqrt_log_variance = torch.sqrt(log_variance)
+    d1 = (torch.log(mean_level / strike) + 0.5 * log_variance) / sqrt_log_variance
+    d2 = d1 - sqrt_log_variance
+    discount_factor = torch.exp(-rate * expiry)
+
+    if option_type == "call":
+        return discount_factor * (mean_level * _normal_cdf(d1) - strike * _normal_cdf(d2))
+    return discount_factor * (strike * _normal_cdf(-d2) - mean_level * _normal_cdf(-d1))
+
+
+def _geometric_asian_price(option_type: str, spot: Tensor, strike: Tensor, expiry: Tensor, volatility: Tensor, rate: Tensor, steps: int) -> Tensor:
+    times = _sampling_times(expiry, steps)
+    log_spot_mean = torch.log(torch.clamp(spot, min=EPSILON)) + (rate - 0.5 * volatility**2) * times.mean()
+    covariance_matrix = torch.minimum(times[:, None], times[None, :])
+    log_variance = volatility**2 * covariance_matrix.mean()
+    second_moment = torch.exp(2.0 * log_spot_mean + 2.0 * log_variance)
+    mean_level = torch.exp(log_spot_mean + 0.5 * log_variance)
+    return _lognormal_option_price(option_type, mean_level, second_moment, strike, expiry, rate)
+
+
+def _arithmetic_asian_lognormal_price(option_type: str, spot: Tensor, strike: Tensor, expiry: Tensor, volatility: Tensor, rate: Tensor, steps: int) -> Tensor:
+    times = _sampling_times(expiry, steps)
+    mean_level = _average_forward_mean(spot, expiry, rate, steps)
+    pairwise_min = torch.minimum(times[:, None], times[None, :])
+    pairwise_growth = torch.exp(rate * (times[:, None] + times[None, :]) + volatility**2 * pairwise_min)
+    second_moment = spot**2 * pairwise_growth.mean()
+    return _lognormal_option_price(option_type, mean_level, second_moment, strike, expiry, rate)
 
 
 @dataclass(frozen=True)
@@ -53,7 +87,7 @@ class AsianOption:
 
     def _normalized_inputs(self):
         spot = _to_tensor(self.underlying)
-        strike = _to_tensor(self.strike, device=spot.device)
+        strike = torch.clamp(_to_tensor(self.strike, device=spot.device), min=EPSILON)
         expiry = _to_tensor(self.expiry, device=spot.device)
         rate = _to_tensor(self.rf_rate, device=spot.device)
         volatility = _to_tensor(self.volatility, device=spot.device)
@@ -65,9 +99,7 @@ class AsianOption:
         if self.averaging_type not in {"arithmetic", "geometric"}:
             raise ValueError("average_type must be either 'arithmetic' or 'geometric'.")
 
-        spot, strike, expiry, volatility, rate = self._normalized_inputs()
         steps = self.steps if num_steps is None else int(num_steps)
-
         if method == "monte_carlo":
             return monte_carlo_price(self, num_simulations=num_simulations, num_steps=steps, seed=seed)
         if method == "analytical_approximation":
@@ -133,7 +165,8 @@ def monte_carlo_price(option: AsianOption, num_simulations: int = 10000, num_ste
     steps = option.steps if num_steps is None else int(num_steps)
 
     if volatility.item() <= 0:
-        return _discounted_intrinsic_from_average(option.option_type, spot, strike, expiry, rate)
+        average_level = _average_forward_mean(spot, expiry, rate, steps)
+        return _discounted_intrinsic(option.option_type, average_level, strike, expiry, rate)
 
     torch.manual_seed(seed)
     return monte_carlo_asian_option(
@@ -154,44 +187,12 @@ def analytical_approximation_price(option: AsianOption, steps: int | None = None
     steps = option.steps if steps is None else int(steps)
 
     if volatility.item() <= 0:
-        return _discounted_intrinsic_from_average(option.option_type, spot, strike, expiry, rate)
+        average_level = _average_forward_mean(spot, expiry, rate, steps)
+        return _discounted_intrinsic(option.option_type, average_level, strike, expiry, rate)
 
-    effective_volatility = _effective_asian_volatility(volatility, steps)
-    if torch.isclose(spot, strike, rtol=1e-6, atol=1e-6):
-        call_price = black_scholes_merton(
-            option_type="call",
-            option_style="european",
-            spot=spot,
-            strike=strike,
-            expiry=expiry,
-            volatility=effective_volatility,
-            rate=rate,
-            dividend=torch.zeros_like(rate),
-        )
-        put_price = black_scholes_merton(
-            option_type="put",
-            option_style="european",
-            spot=spot,
-            strike=strike,
-            expiry=expiry,
-            volatility=effective_volatility,
-            rate=rate,
-            dividend=torch.zeros_like(rate),
-        )
-        midpoint = 0.5 * (call_price + put_price)
-        adjustment = midpoint * 1e-5
-        return midpoint + adjustment if option.option_type == "call" else midpoint - adjustment
-
-    return black_scholes_merton(
-        option_type=option.option_type,
-        option_style="european",
-        spot=spot,
-        strike=strike,
-        expiry=expiry,
-        volatility=effective_volatility,
-        rate=rate,
-        dividend=torch.zeros_like(rate),
-    )
+    if option.averaging_type == "geometric":
+        return _geometric_asian_price(option.option_type, spot, strike, expiry, volatility, rate, steps)
+    return _arithmetic_asian_lognormal_price(option.option_type, spot, strike, expiry, volatility, rate, steps)
 
 
 def asian_option(

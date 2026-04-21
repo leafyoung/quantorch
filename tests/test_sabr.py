@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 from torchquantlib.models.stochastic_volatility.sabr import SABR
@@ -97,5 +99,27 @@ def test_option_price_put_call_parity(sabr_model):
     call_price = sabr_model.option_price(K, T, r, option_type='call', N=10000, steps=100)
     put_price = sabr_model.option_price(K, T, r, option_type='put', N=10000, steps=100)
     F0 = sabr_model.F0.item()
-    parity = call_price - put_price - (F0 - K * torch.exp(-r * T).item())
-    assert abs(parity) < 1e-2  # Allow for some Monte Carlo error
+    parity = call_price - put_price - (F0 - K * math.exp(-r * T))
+    assert abs(parity) < 1e-2
+
+
+def test_normal_model_implied_volatility_positive(sabr_model):
+    implied_vol = sabr_model.implied_volatility(K=100, T=1, r=0.05, model='normal')
+    assert torch.isfinite(implied_vol)
+    assert implied_vol.item() > 0
+
+
+def test_normal_model_option_price_positive(sabr_model):
+    price = sabr_model.option_price(K=100, T=1, r=0.05, option_type='call', model='normal')
+    assert price > 0
+
+
+def test_shifted_lognormal_sabr_handles_low_forward_levels():
+    model = SABR(alpha_init=0.02, beta_init=0.5, rho_init=-0.2, nu_init=0.4, F0=0.01, shift_init=0.03)
+    price = model.option_price(K=0.0, T=2.0, r=0.0, option_type='call', model='lognormal')
+    assert price >= 0
+
+
+def test_invalid_sabr_model_name(sabr_model):
+    with pytest.raises(ValueError):
+        sabr_model.option_price(K=100, T=1, r=0.05, option_type='call', model='invalid')

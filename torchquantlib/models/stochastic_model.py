@@ -5,18 +5,6 @@ from typing import Any, Mapping
 import torch
 
 
-if not getattr(torch, "_torchquantlib_exp_patched", False):
-    _ORIGINAL_TORCH_EXP = torch.exp
-
-    def _safe_torch_exp(value, *args, **kwargs):
-        if not isinstance(value, torch.Tensor):
-            value = torch.as_tensor(value)
-        return _ORIGINAL_TORCH_EXP(value, *args, **kwargs)
-
-    torch.exp = _safe_torch_exp
-    torch._torchquantlib_exp_patched = True
-
-
 class StochasticModel:
     """Shared base class for stochastic simulation models."""
 
