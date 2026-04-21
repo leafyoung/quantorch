@@ -42,6 +42,8 @@ class MarketCalibrationConfig:
     objective: str = "mse"
     normalize_by_spread: bool = True
     normalize_by_vega: bool = False
+    regularization_strength: float = 0.0
+    parameter_priors: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,7 @@ class MarketCalibrationResult:
     residuals: dict[str, float]
     duration_ms: float
     num_epochs: int
+    objective_decomposition: dict[str, float] = field(default_factory=dict)
 
 
 class MarketCalibrator:
@@ -67,6 +70,8 @@ class MarketCalibrator:
         objective: str = "mse",
         normalize_by_spread: bool = True,
         normalize_by_vega: bool = False,
+        regularization_strength: float = 0.0,
+        parameter_priors: dict[str, float] | None = None,
     ):
         if not instruments:
             raise ValueError("At least one calibration instrument is required.")
@@ -77,6 +82,8 @@ class MarketCalibrator:
             objective=objective,
             normalize_by_spread=normalize_by_spread,
             normalize_by_vega=normalize_by_vega,
+            regularization_strength=regularization_strength,
+            parameter_priors={} if parameter_priors is None else dict(parameter_priors),
         )
         self.optimizer_cls = optimizer_cls
         self.optimizer = self._setup_optimizer()
@@ -112,6 +119,20 @@ class MarketCalibrator:
         prediction = instrument.pricer(self.model)
         return self._tensor(prediction)
 
+    def _regularization_term(self) -> torch.Tensor:
+        if self.config.regularization_strength <= 0 or not self.config.parameter_priors:
+            return torch.zeros((), device=self.model.device, dtype=torch.float32)
+
+        penalties = []
+        for name, prior_value in self.config.parameter_priors.items():
+            if name not in self.model.params:
+                continue
+            prior_tensor = self._tensor(prior_value)
+            penalties.append((self.model.params[name] - prior_tensor) ** 2)
+        if not penalties:
+            return torch.zeros((), device=self.model.device, dtype=torch.float32)
+        return self.config.regularization_strength * torch.stack([penalty.mean() for penalty in penalties]).sum()
+
     def _residual_snapshot(self) -> dict[str, float]:
         residuals: dict[str, float] = {}
         with torch.no_grad():
@@ -146,6 +167,7 @@ class MarketCalibrator:
             residuals=self._residual_snapshot(),
             duration_ms=0.0,
             num_epochs=0,
+            objective_decomposition={},
         )
 
     def calibrate(self, num_epochs: int = 100, *, verbose: bool = True) -> MarketCalibrationResult:
@@ -170,13 +192,22 @@ class MarketCalibrator:
                 target = self._tensor(instrument.target)
                 prediction = self._instrument_prediction(instrument)
                 terms.append(self._objective_term(prediction, target, instrument))
-            loss = torch.stack(terms).mean()
+            data_loss = torch.stack(terms).mean()
+            regularization_loss = self._regularization_term()
+            loss = data_loss + regularization_loss
             loss.backward()
             self.optimizer.step()
             self.model._apply_constraints()
             self.loss_history.append(float(loss.item()))
 
         duration_ms = round((time.perf_counter() - run_started_at) * 1000, 3)
+        final_data_terms = []
+        for instrument in self.instruments:
+            target = self._tensor(instrument.target)
+            prediction = self._instrument_prediction(instrument)
+            final_data_terms.append(self._objective_term(prediction, target, instrument).detach())
+        final_data_loss = torch.stack(final_data_terms).mean().item()
+        final_regularization_loss = float(self._regularization_term().detach().item())
         self.last_result = MarketCalibrationResult(
             final_loss=self.loss_history[-1],
             loss_history=tuple(self.loss_history),
@@ -184,6 +215,10 @@ class MarketCalibrator:
             residuals=self._residual_snapshot(),
             duration_ms=duration_ms,
             num_epochs=int(num_epochs),
+            objective_decomposition={
+                "data_loss": float(final_data_loss),
+                "regularization_loss": final_regularization_loss,
+            },
         )
         self._emit_event(
             {

@@ -47,3 +47,22 @@ def test_market_calibrator_returns_residual_snapshot():
     assert "k1" in result.residuals
     assert isinstance(result.residuals["k1"], float)
     assert result.num_epochs == 50
+
+
+def test_market_calibrator_regularization_tracks_objective_decomposition():
+    model = MockSurfaceModel()
+    instruments = [
+        CalibrationInstrument(name="k1", target=1.0, pricer=lambda m: m.quote(1.0), weight=1.0),
+    ]
+    calibrator = MarketCalibrator(
+        model,
+        instruments,
+        lr=0.05,
+        regularization_strength=10.0,
+        parameter_priors={"level": 0.5, "slope": 0.0},
+    )
+    result = calibrator.calibrate(num_epochs=25, verbose=False)
+
+    assert "data_loss" in result.objective_decomposition
+    assert "regularization_loss" in result.objective_decomposition
+    assert result.objective_decomposition["regularization_loss"] >= 0

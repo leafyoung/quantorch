@@ -6,6 +6,28 @@ from torchquantlib.models.stochastic_model import StochasticModel
 class Vasicek(StochasticModel):
     """Vasicek interest rate model."""
 
+    def zero_coupon_bond_price(self, maturity, r_t=None):
+        maturity_tensor = self.tensor(maturity)
+        if maturity_tensor.item() <= 0:
+            return torch.ones((), device=self.device, dtype=self.params["r0"].dtype)
+
+        kappa = torch.clamp(self.params["kappa"], min=1e-12)
+        theta = self.params["theta"]
+        sigma = torch.clamp(self.params["sigma"], min=0.0)
+        short_rate = self.params["r0"] if r_t is None else self.tensor(r_t)
+
+        b_term = (1 - torch.exp(-kappa * maturity_tensor)) / kappa
+        a_term = torch.exp(
+            (theta - sigma**2 / (2 * kappa**2)) * (b_term - maturity_tensor)
+            - (sigma**2) * b_term**2 / (4 * kappa)
+        )
+        return a_term * torch.exp(-b_term * short_rate)
+
+    def zero_coupon_yield(self, maturity, r_t=None):
+        maturity_tensor = self.tensor(maturity)
+        price = self.zero_coupon_bond_price(maturity_tensor, r_t=r_t)
+        return -torch.log(torch.clamp(price, min=1e-12)) / torch.clamp(maturity_tensor, min=1e-12)
+
     parameter_constraints = {
         "kappa": {"min": 1e-6},
         "sigma": {"min": 1e-6},

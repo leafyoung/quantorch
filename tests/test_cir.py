@@ -95,3 +95,16 @@ def test_negative_rates_handling():
     S0, T, N, steps = 100, 1, 1000, 252
     result = cir_model.simulate(S0, T, N, steps)
     assert torch.all(result >= 0)  # All rates should be non-negative
+
+
+def test_zero_coupon_bond_price_is_positive_and_decreases_with_maturity(cir_model):
+    short_price = cir_model.zero_coupon_bond_price(1.0)
+    long_price = cir_model.zero_coupon_bond_price(5.0)
+    assert short_price > 0
+    assert long_price > 0
+    assert short_price > long_price
+
+
+def test_zero_coupon_yield_is_finite(cir_model):
+    ytm = cir_model.zero_coupon_yield(2.0)
+    assert torch.isfinite(ytm)

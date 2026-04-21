@@ -11,6 +11,12 @@ from torchquantlib.calibration.option_surface_calibration import (
     build_option_surface_instruments,
     calibrate_option_surface,
 )
+from torchquantlib.calibration.yield_curve_calibration import (
+    YieldCurveCalibrationResult,
+    YieldCurvePoint,
+    build_yield_curve_instruments,
+    calibrate_yield_curve,
+)
 
 __all__ = [
     "CalibrationConfig",
@@ -22,5 +28,9 @@ __all__ = [
     "OptionSurfaceCalibrationResult",
     "OptionSurfaceQuote",
     "build_option_surface_instruments",
+    "build_yield_curve_instruments",
     "calibrate_option_surface",
+    "calibrate_yield_curve",
+    "YieldCurveCalibrationResult",
+    "YieldCurvePoint",
 ]

@@ -8,6 +8,7 @@ from torchquantlib.core.asset_pricing.bond.bond_pricer import (
     putable_bond,
     putable_bond_lattice,
     convertible_bond,
+    convertible_bond_lattice,
     stochastic_rate_bond
 )
 
@@ -155,3 +156,16 @@ def test_putable_bond_lattice_matches_zero_vol_wrapper(setup_tensors):
         setup_tensors['put_period'],
     )
     assert torch.isclose(lattice_price, wrapper_price, atol=1e-6)
+
+
+def test_convertible_bond_lattice_is_at_least_conversion_value():
+    price = convertible_bond_lattice(
+        face_value=torch.tensor(1000.0),
+        coupon_rate=torch.tensor(0.03),
+        rate=torch.tensor(0.04),
+        periods=torch.tensor(5),
+        conversion_ratio=torch.tensor(8.0),
+        stock_price=torch.tensor(120.0),
+        stock_volatility=torch.tensor(0.25),
+    )
+    assert price >= torch.tensor(8.0 * 120.0)

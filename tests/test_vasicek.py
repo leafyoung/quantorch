@@ -98,3 +98,16 @@ def test_long_term_distribution():
     theoretical_var = (vasicek_model.params['sigma']**2) / (2 * vasicek_model.params['kappa'])
     assert torch.isclose(result.mean(), theoretical_mean, rtol=0.1)
     assert torch.isclose(result.var(), theoretical_var, rtol=0.1)
+
+
+def test_zero_coupon_bond_price_is_positive_and_decreases_with_maturity(vasicek_model):
+    short_price = vasicek_model.zero_coupon_bond_price(1.0)
+    long_price = vasicek_model.zero_coupon_bond_price(5.0)
+    assert short_price > 0
+    assert long_price > 0
+    assert short_price > long_price
+
+
+def test_zero_coupon_yield_is_finite(vasicek_model):
+    ytm = vasicek_model.zero_coupon_yield(2.0)
+    assert torch.isfinite(ytm)

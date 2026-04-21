@@ -140,6 +140,54 @@ def convertible_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, peri
     return torch.maximum(straight_value, conversion_value)
 
 
+def convertible_bond_lattice(
+    face_value: Tensor,
+    coupon_rate: Tensor,
+    rate: Tensor,
+    periods: Tensor,
+    conversion_ratio: Tensor,
+    stock_price: Tensor,
+    stock_volatility: Tensor,
+    *,
+    dividend_yield: Tensor | None = None,
+) -> Tensor:
+    period_count = max(1, int(periods.item()))
+    dtype = face_value.dtype
+    device = face_value.device
+
+    coupon = face_value * coupon_rate.to(device=device, dtype=dtype)
+    rate_tensor = rate.to(device=device, dtype=dtype)
+    stock0 = stock_price.to(device=device, dtype=dtype)
+    volatility = torch.clamp(stock_volatility.to(device=device, dtype=dtype), min=0.0)
+    dividend = torch.zeros((), device=device, dtype=dtype) if dividend_yield is None else dividend_yield.to(device=device, dtype=dtype)
+
+    dt = torch.tensor(1.0, device=device, dtype=dtype)
+    if volatility.item() == 0:
+        growth = torch.exp((rate_tensor - dividend) * dt)
+        terminal_stock = stock0 * growth**period_count
+        continuation = torch.full((period_count + 1,), torch.maximum(face_value, conversion_ratio * terminal_stock).item(), device=device, dtype=dtype)
+        for _ in range(period_count - 1, -1, -1):
+            continuation = (coupon + continuation[:-1]) / torch.clamp(1.0 + rate_tensor, min=EPSILON)
+        return continuation[0]
+
+    up = torch.exp(volatility * torch.sqrt(dt))
+    down = 1.0 / up
+    growth = torch.exp((rate_tensor - dividend) * dt)
+    probability = torch.clamp((growth - down) / torch.clamp(up - down, min=EPSILON), min=0.0, max=1.0)
+
+    terminal_stock = stock0 * (up ** torch.arange(period_count, -1, -1, device=device, dtype=dtype)) * (down ** torch.arange(0, period_count + 1, device=device, dtype=dtype))
+    continuation = torch.maximum(face_value * torch.ones_like(terminal_stock), conversion_ratio * terminal_stock)
+
+    for step in range(period_count - 1, -1, -1):
+        stock_nodes = stock0 * (up ** torch.arange(step, -1, -1, device=device, dtype=dtype)) * (down ** torch.arange(0, step + 1, device=device, dtype=dtype))
+        expected_next = probability * continuation[:-1] + (1.0 - probability) * continuation[1:]
+        hold_value = (coupon + expected_next) / torch.clamp(1.0 + rate_tensor, min=EPSILON)
+        conversion_value = conversion_ratio * stock_nodes
+        continuation = torch.maximum(hold_value, conversion_value)
+
+    return continuation[0]
+
+
 def stochastic_rate_bond(face_value: Tensor, coupon_rate: Tensor, rate: Tensor, periods: Tensor) -> Tensor:
     coupon = face_value * coupon_rate
     period_count = max(1, int(periods.item()))
@@ -153,6 +201,7 @@ __all__ = [
     "callable_bond",
     "callable_bond_lattice",
     "convertible_bond",
+    "convertible_bond_lattice",
     "coupon_bond",
     "putable_bond",
     "putable_bond_lattice",
