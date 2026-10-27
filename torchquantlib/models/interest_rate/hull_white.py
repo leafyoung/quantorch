@@ -56,6 +56,25 @@ class HullWhiteModel(StochasticModel):
         return dfdt + a * forward + (sigma**2 / (2.0 * a)) * (1.0 - torch.exp(-2.0 * a * maturity_tensor))
 
     def zero_coupon_bond_price(self, maturity, r_t=None):
+        """Curve-consistent Hull-White ZCB price (Brigo-Mercurio (3.39)) at t=0.
+
+        P(0,T) = A(0,T) * exp(-B(0,T) * r_t) with
+            B(0,T) = (1 - exp(-a*T)) / a
+            ln A(0,T) = ln P^M(0,T) + B(0,T) * f^M(0,0)
+        (the sigma^2 term of A vanishes at t=0). P^M is the fitted initial
+        discount curve — or the flat exp(-r0*t) default — and f^M(0,0) the
+        initial instantaneous forward rate.
+
+        Replaces the previous zero-drift approximation, which ignored the
+        market-curve drift and did not reproduce the initial curve (e.g. with
+        the flat default curve it priced the 1y ZCB at 0.97187 instead of
+        exp(-r0) = 0.97045 for r0=3%, a=0.1, sigma=0.01).
+
+        The formula is evaluated in float64 (Heston's pattern): f^M(0,0) is a
+        one-sided finite difference of log discount factors at a 1e-4 bump,
+        which cancels catastrophically in float32; the result is cast back to
+        the model dtype.
+        """
         maturity_tensor = self.tensor(maturity)
         if maturity_tensor.item() <= 0:
             return torch.ones((), device=self.device, dtype=self.params["r0"].dtype)
@@ -63,13 +82,23 @@ class HullWhiteModel(StochasticModel):
         if r_t is None and hasattr(self, "curve_maturities") and hasattr(self, "curve_discount_factors"):
             return self.initial_discount_factor(maturity_tensor)
 
-        a = torch.clamp(self.params["a"], min=1e-12)
-        sigma = torch.clamp(self.params["sigma"], min=0.0)
-        short_rate = self.params["r0"] if r_t is None else self.tensor(r_t)
+        a = self.params["a"].double().clamp(min=1e-12)
+        short_rate = self.params["r0"].double() if r_t is None else self.tensor(r_t).double()
+        maturity64 = maturity_tensor.double()
 
-        b_term = (1 - torch.exp(-a * maturity_tensor)) / a
-        a_term = torch.exp((sigma**2 / (4 * a**3)) * (2 * a * maturity_tensor + 4 * torch.exp(-a * maturity_tensor) - torch.exp(-2 * a * maturity_tensor) - 3))
-        return a_term * torch.exp(-b_term * short_rate)
+        def discount_factor_f64(t):
+            if hasattr(self, "curve_maturities") and hasattr(self, "curve_discount_factors"):
+                return _linear_interpolate(
+                    t, self.curve_maturities.double(), self.curve_discount_factors.double())
+            return torch.exp(-self.params["r0"].double() * t)
+
+        b_term = (1 - torch.exp(-a * maturity64)) / a
+        market_price = discount_factor_f64(maturity64)
+        bump = torch.tensor(1e-4, device=self.device, dtype=maturity64.dtype)
+        f0 = (-torch.log(torch.clamp(discount_factor_f64(bump), min=1e-12))
+              + torch.log(torch.clamp(discount_factor_f64(torch.zeros((), device=self.device, dtype=maturity64.dtype)), min=1e-12))) / bump
+        a_term = market_price * torch.exp(b_term * f0)
+        return (a_term * torch.exp(-b_term * short_rate)).to(dtype=self.tensor(0.0).dtype)
 
     def zero_coupon_yield(self, maturity, r_t=None):
         maturity_tensor = self.tensor(maturity)
