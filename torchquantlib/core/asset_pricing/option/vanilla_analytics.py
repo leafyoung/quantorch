@@ -21,10 +21,23 @@ CashOrNothingPayoff + AnalyticEuropeanEngine) and against tff itself in
 float64; test literals in ``tests/test_vanilla_analytics.py`` come from those
 runs.
 
-Rebate convention (tff semantics): for knock-outs the rebate is paid at hit,
-for knock-ins at expiry. QuantLib's AnalyticBarrierEngine agrees with tff on
-knock-in rebates but pays knock-out rebates at expiry, so knock-out-rebate
-literals are tff-float64-verified rather than QL-verified.
+Rebate conventions: by default (``rebate_paid_at_expiry=False``, tff
+semantics) a knock-out rebate is paid at hit and a knock-in rebate at
+expiry. With ``rebate_paid_at_expiry=True`` a knock-out rebate is instead
+paid at expiry iff the barrier is never touched (the standard
+Reiner-Rubinstein knock-out-rebate-at-expiry term ``R * DF * P(survival)``,
+obtained by re-weighting the same survival-probability terms the knock-in
+rows use); knock-in results never depend on the flag.
+
+QuantLib cross-check (AnalyticBarrierEngine, QL 1.44): QL's knock-in rebate
+equals the survival term above to <=2e-15, and QL's knock-out rebate is paid
+at hit with the Haug ``lam = sqrt(mu^2 + 2r/sigma^2)`` parameterization
+(matches QL to <=2e-15), which differs from tff's ``b``-parameterized
+hit-time term (e.g. by +0.0298 on the S=100 K=100 B=85 R=3 vol=25% T=1
+case). QL knock-out totals therefore match neither path; the
+``rebate_paid_at_expiry`` knock-out test literals are composed from pure QL
+numbers, ``QL KO(R=0) + QL KI rebate term``, which equals main + survival
+term exactly (engine agreement <=5.3e-15).
 """
 
 import math
@@ -73,6 +86,7 @@ def barrier_price_analytic(
     is_barrier_down: bool,
     is_knock_out: bool,
     is_call: bool,
+    rebate_paid_at_expiry: bool = False,
 ) -> float:
     """Price a continuously-monitored single-barrier option in closed form
     (Black-Scholes, tff ``barrier_price`` semantics).
@@ -83,8 +97,12 @@ def barrier_price_analytic(
     ``spot``, up barrier above ``spot``), matching the formula's domain.
     ``rebate`` is the fixed cash payout if a knock-out barrier is breached
     (paid at hit) or if a knock-in barrier is never breached (paid at
-    expiry). Numeric arguments accept floats or 0-dim tensors; the return
-    value is a Python float computed in f64.
+    expiry). ``rebate_paid_at_expiry`` only affects knock-outs: with
+    ``True`` the rebate is paid at expiry iff the barrier is never touched
+    instead of at hit; knock-in rebates are paid at expiry in both
+    conventions, so knock-in results are identical under the flag. Numeric
+    arguments accept floats or 0-dim tensors; the return value is a Python
+    float computed in f64.
     """
     volatility = float(volatility)
     strike = float(strike)
@@ -101,6 +119,11 @@ def barrier_price_analytic(
         + (1 if is_call else 0)
     )
     masks = _MASK_GREATER_STRIKE[index] if strike > barrier else _MASK_LOWER_STRIKE[index]
+    if is_knock_out and rebate_paid_at_expiry:
+        # Knock-out with the rebate paid at expiry: move the rebate weight
+        # from the hit-time terms (columns 11-12) onto the survival
+        # probability terms (columns 9-10) that the knock-in rows use.
+        masks = masks[:8] + (masks[10], masks[11], 0.0, 0.0)
 
     call_or_put = 1.0 if is_call else -1.0
     below_or_above = 1.0 if is_barrier_down else -1.0

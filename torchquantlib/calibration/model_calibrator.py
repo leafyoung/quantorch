@@ -49,7 +49,8 @@ class ModelCalibrator:
         self.last_run_summary: dict[str, Any] | None = None
 
     def _prepare_observed_data(self, observed_data) -> torch.Tensor:
-        return torch.as_tensor(observed_data, dtype=torch.float32, device=self.model.device)
+        dtype = getattr(self.model, "dtype", torch.float32)
+        return torch.as_tensor(observed_data, dtype=dtype, device=self.model.device)
 
     def _build_loss_function(self):
         if self.config.loss_type == "sinkhorn":

@@ -65,10 +65,10 @@ def _build_heston_pricer(model: Heston, quote: OptionSurfaceQuote):
             return price
         return black_scholes_implied_volatility(
             price,
-            torch.tensor(quote.spot, device=bound_model.device, dtype=torch.float32),
-            torch.tensor(quote.strike, device=bound_model.device, dtype=torch.float32),
-            torch.tensor(quote.expiry, device=bound_model.device, dtype=torch.float32),
-            torch.tensor(quote.rate, device=bound_model.device, dtype=torch.float32),
+            bound_model.tensor(quote.spot),
+            bound_model.tensor(quote.strike),
+            bound_model.tensor(quote.expiry),
+            bound_model.tensor(quote.rate),
             is_call=quote.option_type == "call",
         )
 
@@ -139,14 +139,34 @@ def build_option_surface_instruments(model, quotes: Sequence[OptionSurfaceQuote]
     return instruments
 
 
+def _apply_model_dtype(model, dtype) -> None:
+    """Propagate a requested calibration dtype onto the model, if any."""
+    if dtype is None:
+        return
+    if not hasattr(model, "set_dtype"):
+        raise TypeError(
+            f"Model of type {type(model).__name__} does not support dtype selection "
+            "(missing set_dtype); expected a StochasticModel subclass."
+        )
+    model.set_dtype(dtype)
+
+
 def calibrate_option_surface(
     model,
     quotes: Sequence[OptionSurfaceQuote],
     *,
     num_epochs: int = 100,
     verbose: bool = True,
+    dtype: torch.dtype | str | None = None,
     **market_calibrator_kwargs,
 ) -> OptionSurfaceCalibrationResult:
+    """Calibrate to an option surface.
+
+    ``dtype`` optionally promotes the model's parameters (and therefore the
+    calibration objective) to e.g. ``torch.float64``; the default ``None``
+    leaves the model dtype untouched (float32, historical behavior).
+    """
+    _apply_model_dtype(model, dtype)
     instruments = build_option_surface_instruments(model, quotes)
     calibrator = MarketCalibrator(model, instruments, **market_calibrator_kwargs)
     result = calibrator.calibrate(num_epochs=num_epochs, verbose=verbose)
@@ -160,6 +180,7 @@ def calibrate_option_surface_multistart(
     starts: int = 3,
     num_epochs: int = 100,
     verbose: bool = True,
+    dtype: torch.dtype | str | None = None,
     **market_calibrator_kwargs,
 ) -> OptionSurfaceMultiStartResult:
     runs: list[OptionSurfaceCalibrationResult] = []
@@ -171,6 +192,7 @@ def calibrate_option_surface_multistart(
                 quotes,
                 num_epochs=num_epochs,
                 verbose=verbose,
+                dtype=dtype,
                 **market_calibrator_kwargs,
             )
         )

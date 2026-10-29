@@ -97,12 +97,16 @@ class MarketCalibrator:
         params = [param for param in self.model.params.values() if param.requires_grad]
         return self.optimizer_cls(params, lr=self.config.lr)
 
+    def _model_dtype(self) -> torch.dtype:
+        return getattr(self.model, "dtype", torch.float32)
+
     def _tensor(self, value: float | torch.Tensor) -> torch.Tensor:
-        tensor = value if isinstance(value, torch.Tensor) else torch.as_tensor(value, dtype=torch.float32)
-        return tensor.to(device=self.model.device, dtype=torch.float32)
+        dtype = self._model_dtype()
+        tensor = value if isinstance(value, torch.Tensor) else torch.as_tensor(value, dtype=dtype)
+        return tensor.to(device=self.model.device, dtype=dtype)
 
     def _weight_scale(self, instrument: CalibrationInstrument) -> torch.Tensor:
-        scale = torch.tensor(float(instrument.weight), device=self.model.device, dtype=torch.float32)
+        scale = torch.tensor(float(instrument.weight), device=self.model.device, dtype=self._model_dtype())
         if self.config.normalize_by_spread and instrument.bid_ask_spread is not None:
             scale = scale / max(float(instrument.bid_ask_spread), 1e-6)
         if self.config.normalize_by_vega and instrument.vega is not None:
@@ -124,7 +128,7 @@ class MarketCalibrator:
 
     def _regularization_term(self) -> torch.Tensor:
         if self.config.regularization_strength <= 0 or not self.config.parameter_priors:
-            return torch.zeros((), device=self.model.device, dtype=torch.float32)
+            return torch.zeros((), device=self.model.device, dtype=self._model_dtype())
 
         penalties = []
         for name, prior_value in self.config.parameter_priors.items():
@@ -133,7 +137,7 @@ class MarketCalibrator:
             prior_tensor = self._tensor(prior_value)
             penalties.append((self.model.params[name] - prior_tensor) ** 2)
         if not penalties:
-            return torch.zeros((), device=self.model.device, dtype=torch.float32)
+            return torch.zeros((), device=self.model.device, dtype=self._model_dtype())
         return self.config.regularization_strength * torch.stack([penalty.mean() for penalty in penalties]).sum()
 
     def _instrument_snapshot(self) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
