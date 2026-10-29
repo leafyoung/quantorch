@@ -198,7 +198,11 @@ def calibrate_option_surface_multistart(
         )
     best = min(runs, key=lambda run: run.result.final_loss)
     final_losses = tuple(run.result.final_loss for run in runs)
-    loss_tensor = torch.tensor(final_losses, dtype=torch.float32)
+    # Diagnostics follow the calibrated model's dtype (float64 route); the
+    # default float32 preserves historical behavior for float32 models.
+    model_dtype = getattr(getattr(best.calibrator, "model", None), "dtype", None)
+    diag_dtype = model_dtype if model_dtype is not None else torch.float32
+    loss_tensor = torch.tensor(final_losses, dtype=diag_dtype)
 
     parameter_dispersion: dict[str, dict[str, float]] = {}
     param_names = best.result.params.keys()
@@ -206,7 +210,7 @@ def calibrate_option_surface_multistart(
         values = [run.result.params[name] for run in runs if isinstance(run.result.params[name], float)]
         if not values:
             continue
-        tensor_values = torch.tensor(values, dtype=torch.float32)
+        tensor_values = torch.tensor(values, dtype=diag_dtype)
         parameter_dispersion[name] = {
             "mean": float(tensor_values.mean().item()),
             "std": float(tensor_values.std(unbiased=False).item()),
