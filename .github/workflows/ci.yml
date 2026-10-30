@@ -9,5 +9,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install numpy scipy geomloss pytest -e . --no-deps
+      - run: pip install numpy scipy geomloss pytest
+      - run: pip install -e . --no-deps
       - run: python -m pytest tests/ -q
