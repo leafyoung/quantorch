@@ -195,7 +195,60 @@ class MarketCalibrator:
             residual_summary=self._residual_summary(self._instrument_snapshot()[0]),
         )
 
-    def calibrate(self, num_epochs: int = 100, *, verbose: bool = True) -> MarketCalibrationResult:
+    def _lbfgs_refine(self, max_iter: int, verbose: bool) -> None:
+        """Second-order L-BFGS polish over the same objective (closure-based,
+        respecting constraints via model._apply_constraints)."""
+        optimizer = torch.optim.LBFGS(
+            [p for p in self.model.params.values() if p.requires_grad],
+            max_iter=max_iter,
+            line_search_fn="strong_wolfe",
+        )
+
+        def closure():
+            optimizer.zero_grad()
+            terms = []
+            for instrument in self.instruments:
+                target = self._tensor(instrument.target)
+                prediction = self._instrument_prediction(instrument)
+                terms.append(self._objective_term(prediction, target, instrument))
+            loss = torch.stack(terms).mean() + self._regularization_term()
+            loss.backward()
+            return loss
+
+        if verbose:
+            self._emit_event(
+                {
+                    "event": "market_calibration_lbfgs_refine",
+                    "module": __name__,
+                    "status": "running",
+                    "max_iter": int(max_iter),
+                },
+                verbose=verbose,
+            )
+        optimizer.step(closure)
+        self.model._apply_constraints()
+        terms = []
+        for instrument in self.instruments:
+            target = self._tensor(instrument.target)
+            prediction = self._instrument_prediction(instrument)
+            terms.append(self._objective_term(prediction, target, instrument))
+        self.loss_history.append(float((torch.stack(terms).mean() + self._regularization_term()).item()))
+
+    def calibrate(
+        self,
+        num_epochs: int = 100,
+        *,
+        verbose: bool = True,
+        lbfgs_refine: int = 0,
+    ) -> MarketCalibrationResult:
+        """Adam (or configured) optimization over ``num_epochs``.
+
+        ``lbfgs_refine`` optionally runs a second-order L-BFGS polish for
+        that many iterations AFTER the first-order loop. This addresses the
+        documented kappa/theta stickiness: distant kappa starts plateau under
+        first-order optimization, and the curvature-aware polish moves the
+        pair along the identifiability valley toward the true surface fit.
+        Default 0 preserves historical behavior."""
         run_started_at = time.perf_counter()
         self.loss_history = []
         self._emit_event(
@@ -224,6 +277,9 @@ class MarketCalibrator:
             self.optimizer.step()
             self.model._apply_constraints()
             self.loss_history.append(float(loss.item()))
+
+        if lbfgs_refine > 0:
+            self._lbfgs_refine(lbfgs_refine, verbose)
 
         duration_ms = round((time.perf_counter() - run_started_at) * 1000, 3)
         final_data_terms = []

@@ -158,6 +158,7 @@ def calibrate_option_surface(
     num_epochs: int = 100,
     verbose: bool = True,
     dtype: torch.dtype | str | None = None,
+    lbfgs_refine: int = 0,
     **market_calibrator_kwargs,
 ) -> OptionSurfaceCalibrationResult:
     """Calibrate to an option surface.
@@ -169,7 +170,8 @@ def calibrate_option_surface(
     _apply_model_dtype(model, dtype)
     instruments = build_option_surface_instruments(model, quotes)
     calibrator = MarketCalibrator(model, instruments, **market_calibrator_kwargs)
-    result = calibrator.calibrate(num_epochs=num_epochs, verbose=verbose)
+    result = calibrator.calibrate(num_epochs=num_epochs, verbose=verbose,
+                                  lbfgs_refine=lbfgs_refine)
     return OptionSurfaceCalibrationResult(calibrator=calibrator, result=result)
 
 

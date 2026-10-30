@@ -10,9 +10,13 @@ DOCUMENTED FINDINGS (2026-10-30, from these tests):
    for short-dated surfaces under first-order optimization. sigma_v/rho/v0
    recover <5%.
 2. Distant kappa starts are STICKY under Adam (stays near 2.7 from a 3.0
-   start at 600 epochs) with the same theta inflation — the multistart
-   entry point exists for this; second-order/annealed schedules are future
-   work.
+   start at 600 epochs) with the same theta inflation. REMEDY ATTEMPTED
+   (2026-10-30): L-BFGS refine (calibrate_option_surface lbfgs_refine) moves
+   kappa toward truth but wanders on sigma_v (line search is not
+   constraints-aware), and multistart lands in the same valley — the binding
+   constraint is SURFACE INFORMATION at 3x3/short-dated, not the optimizer.
+   The cross-check precision budget (5x4 surface, 4000 epochs) recovers all
+   params <=1e-3. lbfgs_refine is kept as a general polish option.
 3. SABR smile-space fit is robust (free beta included).
 """
 import pytest
