@@ -202,8 +202,7 @@ def calibrate_option_surface_multistart(
     final_losses = tuple(run.result.final_loss for run in runs)
     # Diagnostics follow the calibrated model's dtype (float64 route); the
     # default float32 preserves historical behavior for float32 models.
-    model_dtype = getattr(getattr(best.calibrator, "model", None), "dtype", None)
-    diag_dtype = model_dtype if model_dtype is not None else torch.float32
+    diag_dtype = getattr(getattr(best.calibrator, "model", None), "dtype", None) or torch.float32
     loss_tensor = torch.tensor(final_losses, dtype=diag_dtype)
 
     parameter_dispersion: dict[str, dict[str, float]] = {}

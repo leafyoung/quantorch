@@ -195,6 +195,15 @@ class MarketCalibrator:
             residual_summary=self._residual_summary(self._instrument_snapshot()[0]),
         )
 
+    def _objective_mean(self) -> torch.Tensor:
+        """Mean objective (data loss + regularization) over all instruments."""
+        terms = []
+        for instrument in self.instruments:
+            target = self._tensor(instrument.target)
+            prediction = self._instrument_prediction(instrument)
+            terms.append(self._objective_term(prediction, target, instrument))
+        return torch.stack(terms).mean() + self._regularization_term()
+
     def _lbfgs_refine(self, max_iter: int, verbose: bool) -> None:
         """Second-order L-BFGS polish over the same objective (closure-based,
         respecting constraints via model._apply_constraints)."""
@@ -206,12 +215,7 @@ class MarketCalibrator:
 
         def closure():
             optimizer.zero_grad()
-            terms = []
-            for instrument in self.instruments:
-                target = self._tensor(instrument.target)
-                prediction = self._instrument_prediction(instrument)
-                terms.append(self._objective_term(prediction, target, instrument))
-            loss = torch.stack(terms).mean() + self._regularization_term()
+            loss = self._objective_mean()
             loss.backward()
             return loss
 
@@ -227,12 +231,7 @@ class MarketCalibrator:
             )
         optimizer.step(closure)
         self.model._apply_constraints()
-        terms = []
-        for instrument in self.instruments:
-            target = self._tensor(instrument.target)
-            prediction = self._instrument_prediction(instrument)
-            terms.append(self._objective_term(prediction, target, instrument))
-        self.loss_history.append(float((torch.stack(terms).mean() + self._regularization_term()).item()))
+        self.loss_history.append(float(closure().item()))
 
     def calibrate(
         self,
@@ -265,14 +264,7 @@ class MarketCalibrator:
 
         for epoch in range(int(num_epochs)):
             self.optimizer.zero_grad()
-            terms = []
-            for instrument in self.instruments:
-                target = self._tensor(instrument.target)
-                prediction = self._instrument_prediction(instrument)
-                terms.append(self._objective_term(prediction, target, instrument))
-            data_loss = torch.stack(terms).mean()
-            regularization_loss = self._regularization_term()
-            loss = data_loss + regularization_loss
+            loss = self._objective_mean()
             loss.backward()
             self.optimizer.step()
             self.model._apply_constraints()
@@ -282,12 +274,8 @@ class MarketCalibrator:
             self._lbfgs_refine(lbfgs_refine, verbose)
 
         duration_ms = round((time.perf_counter() - run_started_at) * 1000, 3)
-        final_data_terms = []
-        for instrument in self.instruments:
-            target = self._tensor(instrument.target)
-            prediction = self._instrument_prediction(instrument)
-            final_data_terms.append(self._objective_term(prediction, target, instrument).detach())
-        final_data_loss = torch.stack(final_data_terms).mean().item()
+        final_data_loss = float(self._objective_mean().detach().item()) - \
+            float(self._regularization_term().detach().item())
         final_regularization_loss = float(self._regularization_term().detach().item())
         residuals, predictions, targets = self._instrument_snapshot()
         self.last_result = MarketCalibrationResult(
