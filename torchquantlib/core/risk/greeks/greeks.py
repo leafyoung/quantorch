@@ -15,10 +15,11 @@ class MalliavinGreeks:
     theta <= 2.8e-3, rho <= 2.9e-3). The previous implementation multiplied the
     payoff by pathwise derivatives of S_T (e.g. ``S_T*Z/sqrt(T)``) where LR
     weights are required, biasing every European greek by 26x-386x (see
-    cross-check results/risk_golden.json). ``barrier_option_greeks``,
-    ``lookback_option_delta``, ``basket_option_greeks`` and
-    ``asian_option_greeks`` still use the OLD weight construction and are
-    BIASED / UNDER REVIEW (same extra-S_T-factor defect; left unchanged).
+    cross-check results/risk_golden.json). ``barrier_option_greeks``, ``lookback_option_delta``,
+    ``basket_option_greeks`` and ``asian_option_greeks`` were REWRITTEN
+    (2026-10-30) with QuantLib-verified estimators (bridge-smoothed CR-FD
+    for barriers, pathwise argmin/fixing forms for lookback/basket/asian);
+    see each method's docstring for its verification evidence.
     """
 
     def __init__(self, device=None):

@@ -191,6 +191,8 @@ print(results)
 ```python
 # calibrate_heston.py
 
+[![CI](https://github.com/leafyoung/quantorch/actions/workflows/ci.yml/badge.svg)](https://github.com/leafyoung/quantorch/actions/workflows/ci.yml)
+
 import numpy as np
 import torch
 from torchquantlib import Heston, ModelCalibrator
